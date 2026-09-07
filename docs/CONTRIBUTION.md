@@ -17,9 +17,11 @@
 - 技术：JavaScript、Canvas 2D、Web Audio，无运行时依赖。
 - GPT-6 Astra：参与玩法设计、程序化美术、代码、测试和文档；多轮迭代，非 one-shot。
 
-## 投稿前需补齐
+## 发布与投稿状态
 
-公开游戏源码：[stackloomdev/last-beacon](https://github.com/stackloomdev/last-beacon)。目前还没有部署在线试玩或向原仓库发送 PR。应先部署实际产物并验证可访问，再把真实网址用于 README 条目；不要把 localhost 当作投稿试玩入口。
+正式试玩：[last-beacon.loupengju.cc](https://last-beacon.loupengju.cc)。公开游戏源码：[stackloomdev/last-beacon](https://github.com/stackloomdev/last-beacon)。游戏已部署至 Vercel，创作者已确认正式域名可在未登录 Vercel 的浏览器中直接游玩。
+
+上游投稿：[草稿 PR #4](https://github.com/MartinDelophy/awesome-gpt-6-astra/pull/4)。修改中英文 README，在「策略与模拟」加入作品，并更新游戏数量；官网现有 27 项测试与两份清单的解析检查通过。
 
 公开创作记录可使用本项目的 `docs/CREATION.md`。中英文 README 的游戏计数应按提交时原仓库的最新状态更新。作品仅放入一个最贴近核心玩法的分类，并移除对应空状态文字。
 

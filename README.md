@@ -2,7 +2,7 @@
 
 一座灯塔，一张电网。守住最后一束光。
 
-公开源码：[stackloomdev/last-beacon](https://github.com/stackloomdev/last-beacon)。
+在线试玩：[last-beacon.loupengju.cc](https://last-beacon.loupengju.cc) · 公开源码：[stackloomdev/last-beacon](https://github.com/stackloomdev/last-beacon)。
 
 **Last Beacon** 是一款可直接在浏览器中玩的原创等距海岛塔防。炮塔需要通过其他设施或中继站连接到灯塔；有限的电力容量决定哪些设施能够开火。建造、连线、升级，在十波机械生物的进攻中守护海岸，最后迎战深渊巨像。
 
