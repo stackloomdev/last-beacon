@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#192f2e">
+  <meta name="description" data-i18n-content="page.description" content="最后的灯塔 — 一款围绕供电网络布局的海岛塔防。建造、连接、升级，守住最后一束光。免费，无需登录。">
+  <title data-i18n="page.title">最后的灯塔 · Last Beacon</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="stylesheet" href="./src/style.css">
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 44 54" fill="none" aria-hidden="true"><path d="M15 46h14l-3-28H18l-3 28Z" stroke="currentColor" stroke-width="1.5"/><path d="M13 18h18M15 14h14M22 3l10 9H12l10-9ZM11 46h22M17 29h10M16 35h12M22 18v-6M6 14H1M43 14h-5" stroke="currentColor" stroke-width="1.5"/><circle cx="22" cy="15" r="2" fill="currentColor"/></svg>
+        <div><h1>LAST BEACON<span data-i18n="brand.subtitle">最后的灯塔</span></h1><p>KEEP THE LIGHT ALIVE</p></div>
+      </div>
+      <div class="resources" aria-label="资源状态" data-i18n-aria="region.resources">
+        <div class="resource"><span class="resource-icon health-icon">♡</span><div><span class="resource-label" data-i18n="resource.health">灯塔完整度</span><strong id="health">100<span> / 100</span></strong></div></div>
+        <div class="resource"><span class="resource-icon">◇</span><div><span class="resource-label" data-i18n="resource.credits">可用零件</span><strong id="credits">180</strong></div></div>
+        <div class="resource"><span class="resource-icon power-icon">ϟ</span><div><span class="resource-label" data-i18n="resource.power">电网负载</span><strong id="power">3<span> / 12</span></strong></div></div>
+      </div>
+      <div class="header-actions"><button id="language-toggle" class="language-button" type="button" aria-label="切换为英文" title="切换为英文"><span lang="zh-CN">中</span><span aria-hidden="true">/</span><span lang="en">EN</span></button><button id="restart" class="icon-button" aria-label="重新出发" data-i18n-aria="control.restart" title="重新出发" data-i18n-title="control.restart">↻</button><button id="sound" class="icon-button" aria-label="开启声音" title="开启声音 [M]">♪<span class="mute-slash"></span></button><button id="help" class="icon-button" aria-label="打开玩法说明" data-i18n-aria="control.help" title="玩法说明" data-i18n-title="control.help">?</button></div>
+    </header>
+
+    <section class="battle-layout" aria-label="游戏区域" data-i18n-aria="region.game">
+      <div class="field">
+        <div class="field-top"><div><p class="eyebrow">THE OUTER ISLES · SECTOR 01</p><h2><span data-i18n="map.name">暮潮礁</span><span class="map-number">01</span></h2><p class="location-note" data-i18n="map.note">海雾正在靠近。让灯塔继续亮着。</p></div><div class="field-tools"><button id="grid-toggle" class="field-button active" aria-pressed="true" title="显示电网 [G]" data-i18n-title="control.gridTitle"><span class="tool-icon">⌘</span> <span data-i18n="control.grid">电网</span></button><button id="speed" class="field-button" title="切换速度" data-i18n-title="control.speed">1×</button><button id="pause" class="field-button" aria-label="暂停游戏" title="暂停 [空格]" data-i18n-title="control.pauseTitle">Ⅱ</button></div></div>
+        <canvas id="battlefield" aria-label="等距海岛战场。选择下方设施，再点击地图上的圆形基座建造。" data-i18n-aria="map.description"></canvas>
+        <div id="pad-controls" aria-label="可建造基座" data-i18n-aria="region.pads"></div>
+        <div id="wave-banner" class="wave-banner" aria-live="polite"></div>
+        <div id="paused-label" class="paused-label" hidden><span>Ⅱ</span><div data-i18n="paused.title">战场已暂停</div><button id="resume" data-i18n="action.resumeArrow">继续守望 →</button></div>
+        <div class="field-bottom"><div class="compass" aria-hidden="true"><span>N</span><svg viewBox="0 0 40 40"><path d="m20 4 5 16-5 16-5-16Z" fill="none" stroke="currentColor"/><path d="m4 20 16-5 16 5-16 5Z" fill="none" stroke="currentColor"/><circle cx="20" cy="20" r="2" fill="currentColor"/></svg></div><div class="map-caption"><div data-i18n="map.caption">北纬 42° · 最后一座有人驻守的岛屿</div><span>LAST BEACON / COASTAL DEFENSE</span></div><span id="phase-tag" class="phase-tag"><i></i> 部署阶段</span></div>
+        <div id="toast" role="status" class="toast"></div>
+      </div>
+
+      <aside class="command-panel" aria-label="指挥面板" data-i18n-aria="region.command">
+        <div class="panel-heading"><span data-i18n="panel.heading">守望者日志</span><span class="tiny-star">✳</span></div>
+        <div class="wave-overview"><p class="eyebrow">INCOMING TIDE</p><div class="wave-count"><strong id="wave-number">01</strong><span>/ 10<small data-i18n="wave.label">来袭波次</small></span></div><div id="wave-progress" class="wave-progress" aria-label="波次进度" data-i18n-aria="wave.progress"></div><div class="next-wave"><span id="wave-name">潮水初动</span><span id="enemy-count">8 个目标</span></div><div id="enemy-preview" class="enemy-preview"></div></div>
+        <div class="panel-rule"></div>
+        <div id="selection" class="selection" aria-live="polite"></div>
+        <div class="panel-bottom"><div id="grid-warning" class="grid-warning" hidden></div><button id="grid-upgrade" class="grid-upgrade"><span>ϟ <span data-i18n="grid.expand">电网扩容</span> <small data-i18n="grid.extra">+6 电力</small></span><span id="grid-price">◇ 100</span></button><button id="overdrive" class="overdrive" hidden><span>ϟ 灯塔超频</span><small>火力提升 80% · 持续 6 秒</small></button><button id="next-wave" class="primary-button"><span>迎接第一波</span><b>→</b></button><p id="wave-hint" class="wave-hint">准备好后出发，不会自动开始</p></div>
+      </aside>
+    </section>
+
+    <section class="build-dock" aria-label="建造设施" data-i18n-aria="region.build">
+      <div class="dock-heading"><span class="eyebrow">BUILD YOUR DEFENSE</span><h2 data-i18n="build.title">构筑防线</h2><p id="build-hint">选择设施，再点击空基座</p></div>
+      <div class="build-cards">
+        <button class="build-card" data-type="gun" aria-pressed="false"><kbd>1</kbd><canvas class="tower-icon" data-icon="gun" width="160" height="144" aria-hidden="true"></canvas><div class="card-name"><span data-i18n="tower.gun.name">哨戒炮</span><small>SENTINEL</small></div><span class="card-role" data-i18n="tower.gun.role">精准单体</span><div class="card-cost"><strong>◇ 65</strong><span>ϟ 3</span></div></button>
+        <button class="build-card" data-type="mortar" aria-pressed="false"><kbd>2</kbd><canvas class="tower-icon" data-icon="mortar" width="160" height="144" aria-hidden="true"></canvas><div class="card-name"><span data-i18n="tower.mortar.name">迫击炮</span><small>MORTAR</small></div><span class="card-role" data-i18n="tower.mortar.role">范围爆破</span><div class="card-cost"><strong>◇ 100</strong><span>ϟ 5</span></div></button>
+        <button class="build-card" data-type="frost" aria-pressed="false"><kbd>3</kbd><canvas class="tower-icon" data-icon="frost" width="160" height="144" aria-hidden="true"></canvas><div class="card-name"><span data-i18n="tower.frost.name">寒潮塔</span><small>FROST</small></div><span class="card-role" data-i18n="tower.frost.role">减速控制</span><div class="card-cost"><strong>◇ 75</strong><span>ϟ 3</span></div></button>
+        <button class="build-card" data-type="relay" aria-pressed="false"><kbd>4</kbd><canvas class="tower-icon" data-icon="relay" width="160" height="144" aria-hidden="true"></canvas><div class="card-name"><span data-i18n="tower.relay.name">中继站</span><small>RELAY</small></div><span class="card-role" data-i18n="tower.relay.role">延伸电网</span><div class="card-cost"><strong>◇ 30</strong><span>ϟ 0</span></div></button>
+      </div>
+      <div class="dock-note"><span data-i18n="build.noteTitle">连接，才有力量。</span><p data-i18n="build.note">所有设施都能传导电力。<br>中继站可以连接更远的基座。</p></div>
+    </section>
+    <footer class="statusbar"><span><i></i> <span data-i18n="status.local">本地运行 · 无需登录</span></span><span class="keyboard-hints" data-i18n="status.shortcuts">1–4 选择设施 <em>·</em> ESC 取消 <em>·</em> 空格 开始 / 暂停</span><span id="best-record">A GAME BY STACKLOOMDEV</span></footer>
+  </main>
+
+  <dialog id="help-dialog" class="game-dialog"><div class="dialog-top"><span class="eyebrow">THE KEEPER’S HANDBOOK</span><button class="close-dialog" aria-label="关闭玩法说明" data-i18n-aria="control.closeHelp">×</button></div><h2 data-i18n="help.title">这一夜，由你守望。</h2><p class="dialog-intro" data-i18n="help.intro">守住十波来袭的机械生物，击败深渊巨像。灯塔完整度归零即失败。</p><div class="help-grid"><section><span data-i18n="help.buildLabel">01 / 建造</span><h3 data-i18n="help.buildTitle">把火力放在必经之路。</h3><p data-i18n="help.buildText">选择设施，再点击圆形基座。悬停基座可预览射程。点击已有设施可升级或出售；最高三级，出售返还投入的 70%。起始免费炮塔没有基础退款。</p></section><section><span data-i18n="help.powerLabel">02 / 供电</span><h3 data-i18n="help.powerTitle">让整条防线保持连接。</h3><p data-i18n="help.powerText">电力来自灯塔。设施之间在 3 格内自动连线，中继站可连接 4.8 格。电力不足时，较晚建造的设施停机；升级电网可增加 6 点容量。出售中继可能让下游断电。</p></section><section><span data-i18n="help.battleLabel">03 / 应战</span><h3 data-i18n="help.battleTitle">不同的敌人，不同的答案。</h3><p data-i18n="help.battleText">哨戒炮提供稳定火力，迫击炮对付密集敌群，寒潮塔拖慢敌人。每波结束获得零件、1 点容量并修复 5 点完整度。建造阶段由你决定何时继续。</p></section><section><span data-i18n="help.overdriveLabel">04 / 超频</span><h3 data-i18n="help.overdriveTitle">在危急时刻点亮灯塔。</h3><p data-i18n="help.overdriveText">战斗时可开启超频，让已供电炮塔的射击频率提升 80%，持续 6 秒，冷却 35 秒。时间随游戏倍速变化，暂停时不会流逝。</p></section></div><div class="help-keys" data-i18n="help.shortcuts">1–4 选择设施　·　G 电网　·　M 声音　·　空格 开始 / 暂停　·　ESC 取消</div><button class="primary-button close-help"><span data-i18n="help.back">回到灯塔</span><b>→</b></button></dialog>
+  <dialog id="restart-dialog" class="game-dialog small-dialog"><span class="eyebrow">A NEW WATCH</span><h2 data-i18n="restart.title">重新出发？</h2><p class="dialog-intro" data-i18n="restart.description">本局的防线和进度会重置，最高纪录和语言选择会保留。</p><div class="dialog-actions"><button data-i18n="restart.cancel" id="cancel-restart" class="secondary-button">继续本局</button><button data-i18n="restart.confirm" id="confirm-restart" class="primary-button">重新出发 →</button></div></dialog>
+  <dialog id="result-dialog" class="game-dialog result-dialog"><span id="result-kicker" class="eyebrow">THE LIGHT REMAINS</span><div class="result-art" aria-hidden="true">✦</div><h2 id="result-title">黎明终于抵达。</h2><p id="result-copy" class="dialog-intro"></p><div id="result-stats" class="result-stats"></div><button id="play-again" class="primary-button"><span data-i18n="result.again">再守望一次</span><b>→</b></button><button data-i18n="result.view" id="view-island" class="text-button">查看战场</button></dialog>
+  <noscript>请启用 JavaScript 运行游戏。Please enable JavaScript to play. 无需登录 / No account or API key required.</noscript>
+</body>
+</html>
