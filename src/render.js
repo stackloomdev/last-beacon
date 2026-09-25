@@ -1,4 +1,4 @@
-import {PADS,PATH,SOURCE,TYPES,ENEMIES,towerStats,dist} from './game.js';
+import {PADS,PATH,SOURCE,TYPES,ENEMIES,STRIKE,towerStats,dist} from './game.js';
 import {t} from './i18n.js';
 
 const TAU=Math.PI*2;
@@ -14,7 +14,7 @@ const COLORS={grass:['#788f69','#81966e','#7c9268','#869a73','#748c66','#889c72'
 
 export class Renderer {
   constructor(canvas,game) {
-    this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.game=game;
+    this.kind='2d';this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.game=game;this.aim=null;
     this.time=0;this.hover=null;this.selected=null;this.buildType=null;this.grid=true;this.particles=[];this.shake=0;
     this.cache=document.createElement('canvas');this.clouds=[];
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas);
@@ -31,6 +31,18 @@ export class Renderer {
     this.canvas.dispatchEvent(new CustomEvent('mapresize'));
   }
   p(x,y,z=0){return {x:this.ox+(x-6.5-y+5.5)*this.s,y:this.oy+((x-6.5)+(y-5.5))*this.s*.52-z*this.s};}
+  // Inverse of the isometric projection on the ground plane.
+  pickGround(px,py){const u=(px-this.ox)/this.s,v=(py-this.oy+.3*this.s)/(this.s*.52);return {x:(u+v+13)/2,y:(v-u+11)/2};}
+  consumeClick(){return false;}
+  setGame(game){this.game=game;this.particles=[];this.shake=0;this.aim=null;}
+  dispose(){this.observer.disconnect();}
+  onEvent(e) {
+    if(e.type==='kill')this.burst(e.x,e.y,e.color,e.enemyType==='boss'?28:8);
+    if(e.type==='build'||e.type==='upgrade')this.burst(e.tower.x,e.tower.y,TYPES[e.tower.type].color,18);
+    if(e.type==='split')this.burst(e.x,e.y,'#b8ff72',10);
+    if(e.type==='strikeHit'){this.burst(e.x,e.y,'#ffe2a0',30);this.shake=1;}
+    if(e.type==='leak')this.shake=1;
+  }
   poly(points,fill,stroke,width=1) {
     const c=this.ctx;c.beginPath();points.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.closePath();
     if(fill){c.fillStyle=fill;c.fill();}if(stroke){c.strokeStyle=stroke;c.lineWidth=width;c.stroke();}
@@ -157,8 +169,12 @@ export class Renderer {
       this.poly([top,{x:mid.x+s*.2,y:mid.y},bottom,mid],'#bce4d8');
       this.poly([top,mid,bottom,{x:mid.x-s*.2,y:mid.y}],'#7db8b3');
       if(t.powered||ghost)this.ellipse(mid,s*.32,s*.12,null,'#b4dedb88');
+    } else if(t.type==='arc') {
+      this.cylinder(t.x,t.y,z+.36,.12,.1,'#ebe7da','#cfc9b8','#b3ad9c');
+      this.cylinder(t.x,t.y,z+.46,.07,.34,'#c98a4f','#a86a36','#8a5429');
+      this.ellipse(this.p(t.x,t.y,z+.84),s*.2,s*.085,'#c9ced6','#8f95a0',1.5);
+      this.circle(this.p(t.x,t.y,z+.9),s*.05,t.powered||ghost?'#e3dcff':'#8a8a95');
     } else {
-      this.box(t.x,t.y,z+.36,.19,.19,.65,'#dde0bf','#bbc4a2','#93ac8c');
       this.box(t.x,t.y,z+.85,.66,.13,.10,'#ccd8af','#a9bd94','#879f7d');
       this.circle(this.p(t.x,t.y,z+1.08),s*.075,t.connected?'#e9f6b0':'#737e68');
       for(const d of [-.24,.24])this.line([this.p(t.x+d,t.y,z+.95),this.p(t.x+d,t.y,z+1.10)],'#465f4a',2);
@@ -171,7 +187,7 @@ export class Renderer {
     c.restore();
   }
   drawEnemy(e) {
-    const s=this.s,p=this.p(e.x,e.y,.34),boss=e.type==='boss',scale=boss?2.2:e.type==='tank'?1.35:e.type==='runner'?.7:1;
+    const s=this.s,p=this.p(e.x,e.y,.34),boss=e.type==='boss',scale=boss?2.2:e.type==='tank'?1.35:e.type==='runner'?.7:e.type==='splitter'?1.12:e.type==='spawn'?.55:1;
     this.ellipse({...p,y:p.y+s*.1},s*.3*scale,s*.13*scale,'#233b3e45');
     const color=e.hit>0?'#ffe5bf':e.slow>0?'#8fb9b9':e.color;
     for(let i=0;i<3;i++) {
@@ -246,6 +262,7 @@ export class Renderer {
     for(const p of g.projectiles) {
       const t=p.age/p.duration,a=this.p(p.fromX,p.fromY,.92),enemy=g.enemies.find(e=>e.id===p.target),b=this.p(p.kind==='mortar'?p.toX:enemy?.x??p.toX,p.kind==='mortar'?p.toY:enemy?.y??p.toY,.55);
       const point={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t-(p.kind==='mortar'?Math.sin(t*Math.PI)*s*2:0)};
+      if(p.kind==='arc'){const pts=[a,...(p.points||[]).map(q=>this.p(q.x,q.y,.55))];for(let i=1;i<pts.length;i++){const m={x:(pts[i-1].x+pts[i].x)/2+(rnd(i,this.time*40)-.5)*10,y:(pts[i-1].y+pts[i].y)/2+(rnd(this.time*40,i)-.5)*10};this.line([pts[i-1],m,pts[i]],'#d9ceffdd',2);}continue;}
       if(p.kind==='frost')this.line([a,point],'#bbefe8bb',2);
       else this.line([{x:point.x-(b.x-a.x)*.08,y:point.y-(b.y-a.y)*.08},point],'#ffdc9fab',2);
       this.circle(point,p.kind==='mortar'?3:2,p.kind==='frost'?'#d4fff2':'#ffedbd');
@@ -253,7 +270,13 @@ export class Renderer {
     for(const fx of g.effects)if(fx.kind==='blast') {
       const p=this.p(fx.x,fx.y,.5),t=1-fx.life/fx.total;c.globalAlpha=1-t;
       this.ellipse(p,s*(.2+t*1.5),s*(.1+t*.7),'#f2be7833','#f3d5a6',2);c.globalAlpha=1;
+    } else if(fx.kind==='strike') {
+      const p=this.p(fx.x,fx.y,.3),t=1-fx.life/fx.total;c.globalAlpha=1-t;
+      this.poly([{x:p.x-s*.25,y:p.y-s*8},{x:p.x+s*.25,y:p.y-s*8},{x:p.x+s*.12,y:p.y},{x:p.x-s*.12,y:p.y}],'#ffe7b066');
+      this.ellipse(p,s*STRIKE.radius*(.6+t*.8),s*STRIKE.radius*.52*(.6+t*.8),'#ffe2a033','#fff0c8',2.5);c.globalAlpha=1;
     }
+    for(const strike of g.strikes||[]){const p=this.p(strike.x,strike.y,.3),k=1-strike.delay/STRIKE.delay;this.ellipse(p,s*STRIKE.radius*(1-k*.5),s*STRIKE.radius*.52*(1-k*.5),null,'#ffe2a0',1+2*k);}
+    if(this.aim){const r=STRIKE.radius,pts=Array.from({length:49},(_,i)=>this.p(this.aim.x+Math.cos(i/48*TAU)*r,this.aim.y+Math.sin(i/48*TAU)*r,.32));this.poly(pts,'#ffe7a31a','#ffe7a3',1.5);}
     if(!g.paused)for(const p of this.particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;p.vz-=6*dt;}
     this.particles=this.particles.filter(p=>p.life>0);
     for(const part of this.particles){c.globalAlpha=Math.min(1,part.life*2);this.circle(this.p(part.x,part.y,Math.max(.2,part.z)),2,part.color);}c.globalAlpha=1;
