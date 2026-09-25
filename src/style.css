@@ -72,3 +72,20 @@
 #quality>span{display:none}
 .field-top .location-note{display:none}}
 .selection{overflow-y:auto;scrollbar-width:thin;scrollbar-color:#b7b9a7 transparent;overscroll-behavior:contain}
+@media(max-height:920px) and (min-width:641px){.command-panel{padding-top:16px;padding-bottom:12px}
+.panel-heading{padding-bottom:12px}
+.wave-count>strong{font-size:44px}
+.wave-progress{margin-top:9px;margin-bottom:8px}
+.panel-rule{margin:12px 0}
+.selection h3{font-size:18px;margin:8px 0}
+.description{line-height:1.7}
+.steps{gap:9px;margin-top:12px}
+.tower-stats{margin-top:10px;padding:8px 0}
+.tower-stats strong{font-size:16px;margin-top:3px}
+.field-note{margin-top:12px;padding:9px}
+.panel-bottom{margin-top:12px}
+.grid-upgrade{padding:9px 10px;margin-bottom:7px}
+.abilities{margin-bottom:7px}
+.abilities .ability{min-height:42px;padding:7px 8px}
+.primary-button{padding:11px 15px;min-height:42px}
+.wave-hint{margin-top:6px}}

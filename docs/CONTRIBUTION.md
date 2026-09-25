@@ -13,8 +13,8 @@
 **Last Beacon** — Connect a power grid across a miniature island, build and upgrade defenses, and keep a lighthouse alive through ten waves and an abyssal boss.
 
 - 作者：stackloomdev
-- 平台：支持 Canvas 2D 和 ES modules 的现代浏览器；免费，无需登录或 API Key。声音可选，需要 Web Audio。
-- 技术：JavaScript、Canvas 2D、Web Audio，无运行时依赖。
+- 平台：支持 WebGL2 和 ES modules 的现代浏览器；不支持 WebGL2 时自动改用 Canvas 2D 视图。免费，无需登录或 API Key。声音可选，需要 Web Audio。
+- 技术：JavaScript、Three.js（仓库内置，无 CDN）、Canvas 2D（2D 视图）、Web Audio；无需安装依赖。
 - GPT-6 Astra：参与玩法设计、程序化美术、代码、测试和文档；多轮迭代，非 one-shot。
 
 ## 发布与投稿状态

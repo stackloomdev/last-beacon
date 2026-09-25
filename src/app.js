@@ -100,9 +100,10 @@ function bindCanvas(){
 }
 function freshCanvas(){const next=canvas.cloneNode(false);canvas.replaceWith(next);canvas=next;bindCanvas();return next;}
 function createRenderer(){
+  const view=renderer?.rig?.snapshot();
   renderer?.dispose?.();renderer=null;
   if(quality!=='classic'){
-    try{renderer=new World3D(freshCanvas(),game,{quality});renderer.onSound=(kind,options)=>audio.play(kind,options);}
+    try{renderer=new World3D(freshCanvas(),game,{quality,view});renderer.onSound=(kind,options)=>audio.play(kind,options);}
     catch(error){console.warn('3D view unavailable, using 2D.',error);quality='classic';toast('toast.webglFallback');}
   }
   if(!renderer)renderer=new Renderer(freshCanvas(),game);
@@ -237,7 +238,7 @@ document.addEventListener('keydown',e=>{
   else if(key==='o')$('overdrive').click();
   else if(key==='t'){const tower=game.towers.find(t=>t.pad===selectedPad);if(tower&&game.cycleTargeting(tower.id))announceTarget(tower);}
 });
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.phase==='wave'&&!game.paused){game.paused=true;cancelAim();updateHud();}});
+document.addEventListener('visibilitychange',()=>{audio.setHidden(document.hidden);if(document.hidden&&game.phase==='wave'&&!game.paused){game.paused=true;cancelAim();updateHud();}});
 function announceTarget(tower){toast('toast.target',()=>({name:towerName(tower.type),mode:t(`target.${tower.target}`)}));lastSelection='';updateHud();}
 
 // ————— Panels —————

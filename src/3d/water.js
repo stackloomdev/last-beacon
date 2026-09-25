@@ -49,8 +49,8 @@ waterCol=mix(uShallow*1.35+vec3(.05,.08,.06),waterCol,smoothstep(0.,.4,depth));
 float n=vnoise(vWater.xz*2.6+uTime*.12)*.6+vnoise(vWater.xz*6.-uTime*.2)*.4;
 float shore=1.-smoothstep(0.,.16+.08*n,depth);
 float bands=smoothstep(.72,.98,sin(depth*15.-uTime*1.9+n*3.)*.5+.5)*(1.-smoothstep(.02,.5,depth))*smoothstep(.35,.6,n+.2);
-float crest=smoothstep(.055,.1,waveHeight(vWater.xz)*uAmp)*uChop*smoothstep(.4,.8,n);
-float foam=clamp(shore*.95+bands*.75+crest*.7,0.,1.);
+float streak=vnoise(vWater.xz*vec2(9.,3.)+uTime*.3);float crest=smoothstep(.11,.16,waveHeight(vWater.xz)*uAmp)*uChop*smoothstep(.55,.85,n)*smoothstep(.45,.75,streak);
+float foam=clamp(shore*.95+bands*.75+crest*.5,0.,1.);
 diffuseColor.rgb=mix(waterCol*(.75+.5*uBright),uFoam,foam);
 diffuseColor.a=max(mix(.55,1.,smoothstep(0.,1.6,depth)),foam*.95);`)
       .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(roughnessFactor+.06*uChop,.7,foam);');

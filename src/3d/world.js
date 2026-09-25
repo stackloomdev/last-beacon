@@ -32,7 +32,7 @@ function haloTexture() {
 }
 
 export class World3D {
-  constructor(canvas,game,{quality='high'}={}) {
+  constructor(canvas,game,{quality='high',view=null}={}) {
     this.kind='3d';this.canvas=canvas;this.game=game;this.quality=quality;const q=this.q=QUALITY[quality];
     this.hover=null;this.selected=null;this.buildType=null;this.grid=true;this.aim=null;this.time=0;this.clock=0;this.onSound=null;
     const r=this.renderer=new THREE.WebGLRenderer({canvas,antialias:!q.bloom,powerPreference:'high-performance'});
@@ -61,7 +61,11 @@ export class World3D {
     const lineGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
     this.link=new THREE.Line(lineGeo,new THREE.LineDashedMaterial({color:'#eef0bc',dashSize:.14,gapSize:.1,transparent:true,opacity:.85,depthTest:false}));this.link.visible=false;this.link.renderOrder=12;this.scene.add(this.link);
     const fit=[...Array.from({length:40},(_,i)=>{const a=i/40*TAU;return new THREE.Vector3(Math.cos(a)*7.25*.97,0,Math.sin(a)*6.25*.97);}),this.at(SOURCE.x,SOURCE.y,3.7)];
-    this.rig=new CameraRig(this.camera,canvas,fit);this.rig.playIntro();
+    this.rig=new CameraRig(this.camera,canvas,fit);
+    // Respect reduced-motion preferences: no fly-in and no camera shake.
+    this.rig.calm=matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    // A renderer rebuilt for a new quality level keeps the player's camera instead of replaying the fly-in.
+    if(view)this.rig.restore(view);else if(!this.rig.calm)this.rig.playIntro();
     this.bloom=q.bloom?new Bloom(r):null;
     this.atmo.setMood(moodFor(game),true);
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas);this.resize();
@@ -260,7 +264,6 @@ export class World3D {
       if(kind==='frost')this.smoke.spawn({x:p.x,y:p.y,z:p.z,vy:.15,life:.8,size:.18,grow:.3,color:rgb('#dffaff'),alpha:.35,sprite:SPRITE.smoke});
     } else if(e.type==='blast') {
       this.explosion(this.at(e.x,e.y),{size:1,debris:'#6d5a44',shake:.1});
-      this.onSound?.('boom',{x:e.x,y:e.y});
     } else if(e.type==='kill') {
       const p=this.at(e.x,e.y,.05),def=CREATURES[e.enemyType],boss=e.enemyType==='boss',big=boss?2.4:e.enemyType==='tank'?1.25:e.enemyType==='splitter'?.9:e.enemyType==='spawn'?.45:.7;
       if(e.enemyType==='splitter'||e.enemyType==='spawn') {
@@ -283,7 +286,7 @@ export class World3D {
     } else if(e.type==='sell') {
       const t=e.tower;if(t){const p=this.at(t.x,t.y).setY(PAD_TOP);for(let i=0;i<10;i++)this.smoke.spawn({x:p.x+(Math.random()-.5)*.5,y:p.y,z:p.z+(Math.random()-.5)*.5,vy:.4,life:1,size:.15,grow:.3,color:DUST[0],alpha:.5,sprite:SPRITE.smoke});}
     } else if(e.type==='strike') {
-      this.strike={x:e.x,y:e.y,t:0};this.onSound?.('charge',{x:e.x,y:e.y});
+      this.strike={x:e.x,y:e.y,t:0};
     } else if(e.type==='strikeHit') {
       const p=this.at(e.x,e.y),lamp=this.lamp.position.clone();
       this.ribbons.add([lamp,p.clone()],{life:.55,width:.55,color:[1.6,1.3,.8],intensity:2.6,grow:-1.2});
@@ -379,12 +382,13 @@ export class World3D {
   syncCreatures(dt) {
     const g=this.game,alive=new Set(),counts={},cam=this.camera;
     for(const type of Object.keys(this.kinds))counts[type]=0;
-    let legN=0,eyeN=0,clawN=0,barN=0;const tint=new THREE.Color(),legColor=new THREE.Color(),eyeGlow=new THREE.Color(),knee=new THREE.Vector3(),perp=new THREE.Vector3(),size=new THREE.Vector3();
+    let legN=0,eyeN=0,clawN=0,barN=0;const tint=new THREE.Color(),legColor=new THREE.Color(),eyeGlow=new THREE.Color(),knee=new THREE.Vector3(),perp=new THREE.Vector3(),size=new THREE.Vector3(),euler=new THREE.Euler(),jaw=new THREE.Matrix4();
+    const room=(mesh,n,extra=1)=>n+extra<=mesh.instanceMatrix.count;
     for(const e of g.enemies){
       if(e.hp<=0)continue;
-      const k=this.kinds[e.type];if(!k)continue;const def=k.def;alive.add(e.id);
+      const k=this.kinds[e.type];if(!k||!room(k.body,counts[e.type]))continue;const def=k.def;alive.add(e.id);
       let v=this.enemyViews.get(e.id);
-      if(!v){v={yaw:0,gait:Math.random()*6,last:e.distance,born:this.time,sway:Math.random()*6};this.enemyViews.set(e.id,v);
+      if(!v){v={yaw:0,gait:Math.random()*6,last:e.distance};this.enemyViews.set(e.id,v);
         const a=pathPosition(e.distance+.1),b=pathPosition(Math.max(0,e.distance-.1));v.yaw=Math.atan2(-(a.y-b.y),a.x-b.x);
         if(e.distance<.5&&e.type!=='spawn')this.splash(this.at(e.x-.2,e.y),e.type==='boss'?2.5:.7);}
       const moved=e.distance-v.last;v.last=e.distance;v.gait+=moved*Math.PI/def.legs.stride;
@@ -399,7 +403,7 @@ export class World3D {
       // Legs: two-bone IK from hip to a stepping foot.
       const L=def.legs,hips=L.hips;legColor.set(def.leg).multiplyScalar(hit);
       for(let i=0;i<hips.length;i++)for(const side of [1,-1]){
-        if(legN>=2598)break;
+        if(!room(this.legs,legN,2))break;
         const [hx,hz]=hips[i],phase=v.gait+(i%2?Math.PI:0)+(side>0?0:Math.PI)+(hips.length>3?i*.9:0);
         const H=_v.set(hx,def.bodyY*.92+bob,side*hz),fx=hx*1.25+Math.cos(phase)*L.stride*.5,lift=Math.max(0,-Math.sin(phase))*L.lift;
         const F=_v2.set(fx,lift,side*(hz+L.reach));
@@ -412,13 +416,13 @@ export class World3D {
         }
       }
       eyeGlow.set(def.eye).multiplyScalar(e.type==='boss'?5:3.2);
-      for(const [x,y,z] of def.eyes){_m.compose(_v.set(x,y+bob,z),_q.identity(),_s.setScalar(def.eyeSize)).premultiply(root);if(def.eyeScale)_m.scale(_v.fromArray(def.eyeScale));this.eyes.setMatrixAt(eyeN,_m);this.eyes.setColorAt(eyeN++,eyeGlow);}
-      if(def.claws){
+      for(const [x,y,z] of def.eyes){if(!room(this.eyes,eyeN))break;_m.compose(_v.set(x,y+bob,z),_q.identity(),_s.setScalar(def.eyeSize)).premultiply(root);if(def.eyeScale)_m.scale(_v.fromArray(def.eyeScale));this.eyes.setMatrixAt(eyeN,_m);this.eyes.setColorAt(eyeN++,eyeGlow);}
+      if(def.claws&&room(this.clawArms,clawN,2)){
         const c=def.claws,open=.35+.3*Math.sin(this.time*(e.type==='boss'?2.2:3.4)+e.id);
         for(const side of [1,-1]){
-          const arm=_m.compose(_v.set(c.arm[0],c.arm[1]+bob,side*c.arm[2]),_q.setFromEuler(new THREE.Euler(0,-side*.35,.15)),_s.setScalar(c.size*2.2)).premultiply(root);
+          const arm=_m.compose(_v.set(c.arm[0],c.arm[1]+bob,side*c.arm[2]),_q.setFromEuler(euler.set(0,-side*.35,.15)),_s.setScalar(c.size*2.2)).premultiply(root);
           this.clawArms.setMatrixAt(clawN,arm);this.clawArms.setColorAt(clawN,tint);
-          const jaw=new THREE.Matrix4().compose(_v.set(.56,.02,0),_q.setFromEuler(new THREE.Euler(0,0,open)),_s.set(1,1,1)).premultiply(arm);
+          jaw.compose(_v.set(.56,.02,0),_q.setFromEuler(euler.set(0,0,open)),_s.set(1,1,1)).premultiply(arm);
           this.clawJaws.setMatrixAt(clawN,jaw);this.clawJaws.setColorAt(clawN++,tint);
         }
       }
@@ -427,7 +431,7 @@ export class World3D {
       if(stun&&Math.random()<dt*10){_v.set(0,def.hpY*.8,0).applyMatrix4(root);this.additive.spawn({x:_v.x+(Math.random()-.5)*.3,y:_v.y,z:_v.z+(Math.random()-.5)*.3,vy:.3,life:.4,size:.06,color:rgb('#fff0a0',3),sprite:SPRITE.star,spin:5});}
       if(frost&&Math.random()<dt*6){_v.set(0,def.bodyY,0).applyMatrix4(root);this.smoke.spawn({x:_v.x,y:_v.y,z:_v.z,vy:-.05,life:.9,size:.12,grow:.2,color:rgb('#e6fbff'),alpha:.3,sprite:SPRITE.smoke});}
       // Health bar, billboarded towards the camera.
-      if(e.hp<e.maxHp||e.type==='boss'){
+      if((e.hp<e.maxHp||e.type==='boss')&&room(this.hpBack,barN)){
         const w=def.hpW*def.scale,frac=clamp(e.hp/e.maxHp,0,1);_v.set(0,def.hpY,0).applyMatrix4(root);
         _m.compose(_v,cam.quaternion,_s.set(w+.04,e.type==='boss'?.085:.055,1));this.hpBack.setMatrixAt(barN,_m);this.hpBack.setColorAt(barN,_c.set('#1d3533'));
         _v2.set(1,0,0).applyQuaternion(cam.quaternion).multiplyScalar(-(1-frac)*w/2);

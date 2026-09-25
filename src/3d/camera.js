@@ -21,13 +21,17 @@ export class CameraRig {
   playIntro() {
     this.azimuth=this.goal.azimuth-1.25;this.elevation=13*DEG;this.zoom=2.6;this.intro=3.4;
   }
+  snapshot(){return {azimuth:this.goal.azimuth,elevation:this.goal.elevation,zoom:this.goal.zoom,target:this.goalTarget.toArray()};}
+  restore(view){Object.assign(this.goal,{azimuth:view.azimuth,elevation:view.elevation,zoom:view.zoom});this.goalTarget.fromArray(view.target);
+    this.azimuth=view.azimuth;this.elevation=view.elevation;this.zoom=view.zoom;this.target.copy(this.goalTarget);this.intro=0;}
   reset(){this.cancelIntro();Object.assign(this.goal,{...VIEW,azimuth:this.nearestAzimuth(VIEW.azimuth)});this.goalTarget.copy(this.home);}
   nearestAzimuth(a){return a+Math.round((this.goal.azimuth-a)/(Math.PI*2))*Math.PI*2;}
   rotate(steps){this.cancelIntro();this.goal.azimuth+=steps*Math.PI/4;}
   zoomBy(steps){this.cancelIntro();this.goal.zoom=clamp(this.goal.zoom*Math.pow(.84,steps),...LIMITS.zoom);}
-  shake(amount){this.trauma=Math.min(1,this.trauma+amount);}
+  shake(amount){if(!this.calm)this.trauma=Math.min(1,this.trauma+amount);}
   down(e) {
     if(!this.enabled)return;
+    if(this.pointers.size===0)this.suppressClick=false;
     this.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,button:e.button,type:e.pointerType,pan:e.button===2||e.button===1||e.shiftKey||e.ctrlKey,dragging:false});
     if(e.button===2||e.button===1)e.preventDefault();
     this.element.setPointerCapture?.(e.pointerId);

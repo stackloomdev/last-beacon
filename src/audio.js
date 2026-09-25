@@ -25,6 +25,8 @@ export class AudioEngine {
     this.mood={rain:0,wind:.35,waves:1,storm:0,night:0};this.chirp=0;
     return true;
   }
+  // Background tabs stay silent; the looping beds would otherwise keep playing.
+  setHidden(hidden){if(!this.ctx)return;if(hidden)this.ctx.suspend();else if(this.enabled)this.ctx.resume();}
   setAmbience(mood){
     if(!this.ctx||!mood)return;
     const t=this.ctx.currentTime,m=this.mood=mood;
