@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../../vendor/three.module.min.js';
 import {PADS,PATH,SOURCE} from '../game.js';
 
 // Game tiles map to world units: x → X, y → Z, centred on the island. Height is world Y; the sea sits at Y = 0.

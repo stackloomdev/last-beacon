@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../../vendor/three.module.min.js';
 import {PADS,SOURCE,TYPES,PATH,pathPosition,towerStats,STRIKE,dist} from '../game.js';
 import {HeightField,createTerrain,scatter,PAD_Y,PAD_TOP,LIGHTHOUSE_Y,COTTAGE,PIER,MAX_DECALS,ROAD_Y,mulberry} from './terrain.js';
 import {createWater} from './water.js';

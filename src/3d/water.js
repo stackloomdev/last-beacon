@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../../vendor/three.module.min.js';
 import {GRID} from './terrain.js';
 
 // Shared GLSL: a few directional swells plus their analytic slope, reused by vertex displacement and per-pixel normals.

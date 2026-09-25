@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../../vendor/three.module.min.js';
 
 // Each wave has its own light: dusk settles into night, a storm front rolls in, the colossus brings a red dark, victory brings dawn.
 const MOODS={

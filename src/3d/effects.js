@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../../vendor/three.module.min.js';
 
 // A 2×2 atlas: soft glow, smoke puff, four-point star, ring. Drawn once on a canvas.
 function atlasTexture() {

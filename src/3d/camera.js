@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../../vendor/three.module.min.js';
 
 const DEG=Math.PI/180,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export const VIEW={azimuth:45*DEG,elevation:47*DEG,zoom:1};

@@ -7,9 +7,9 @@ for(const file of ['index.html','favicon.svg','src','vendor'])await cp(new URL(f
 
 // A standalone edition opens directly via file:// without ES module restrictions.
 // This tiny bundler follows the module graph from src/app.js and gives every module its own scope.
-// Bare specifiers (three) resolve through the page's import map, so dev server and single file load the same code.
+// Relative imports are followed as-is; bare specifiers would resolve through a page import map if one is added.
 let html=await readFile(new URL('index.html',root),'utf8');
-const importMap=JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]).imports;
+const importMap=JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)?.[1]||'{"imports":{}}').imports;
 const IMPORT=/^import\s+(.+?)\s+from\s+(['"])(.+?)\2;?[ \t]*$/gm;
 const EXPORT_DECLARATION=/^export\s+((?:async\s+)?(function\*?|class|const|let|var)\s+([A-Za-z_$][\w$]*))/gm;
 const modules=new Map(),order=[],exported=new Map(),imported=[];
