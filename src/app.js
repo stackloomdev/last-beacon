@@ -36,8 +36,10 @@ function paintToast(){
 }
 function toast(key,params={}){
   activeToast={key,params};paintToast();$('toast').classList.add('visible');clearTimeout(toastTimer);
-  toastTimer=setTimeout(()=>{activeToast=null;$('toast').classList.remove('visible');toastTimer=setTimeout(()=>{if(!activeToast)$('toast').textContent='';},300);},3300);
+  toastTimer=setTimeout(()=>{activeToast=null;$('toast').classList.remove('visible');},3300);
 }
+// Clear the message only once the fade-out has finished, so a slow frame never shows an empty box.
+$('toast').addEventListener('transitionend',()=>{if(!activeToast)$('toast').textContent='';});
 function paintBanner(){
   if(activeBanner)$('wave-banner').innerHTML=`<small>${t(activeBanner.kicker,activeBanner.params)}</small><strong>${t(activeBanner.title,activeBanner.params)}</strong>`;
 }
