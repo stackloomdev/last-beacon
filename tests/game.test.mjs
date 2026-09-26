@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Game,PADS,PATH,PATH_LENGTH,pathPosition,towerStats,sellValue,waveDefinition,STRIKE,WAVES} from '../src/game.js';
+import {Game,PADS,PATH,PATH_LENGTH,pathPosition,towerStats,sellValue,waveDefinition,STRIKE,WAVES,canStrikeAt} from '../src/game.js';
 
 function advance(g,seconds){for(let t=0;t<seconds;t+=.05){g.tick(.05);g.events.length=0;}}
 function collect(g,seconds){const events=[];for(let t=0;t<seconds;t+=.05){g.tick(.05);events.push(...g.events);g.events.length=0;}return events;}
@@ -119,6 +119,8 @@ test('beacon strike charges, damages and dazzles enemies in range, and respects 
   assert.equal(g.activateStrike(5,8),false,'strike is only available during a wave');
   g.startWave();g.queue=[];
   const near=place(g,'tank',9,false),far=place(g,'tank',2,false);
+  assert.equal(g.activateStrike(15,4),false,'targets off the map are rejected, not moved');assert.equal(g.strikeCooldown,0);assert.equal(g.strikes.length,0);
+  assert.ok(canStrikeAt(-.5,11.5)&&canStrikeAt(13.5,-.5)&&!canStrikeAt(13.6,5)&&!canStrikeAt(5,-1)&&!canStrikeAt(NaN,1));
   assert.equal(g.activateStrike(5,8),true);assert.equal(g.activateStrike(5,8),false);assert.equal(g.activateStrike(NaN,1),false);
   advance(g,STRIKE.delay-.2);assert.equal(near.hp,near.maxHp,'no damage while the lamp charges');
   const events=collect(g,.3);

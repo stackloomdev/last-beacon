@@ -1,4 +1,4 @@
-import {Game,PADS,TYPES,ENEMIES,TARGETING,STRIKE,DIFFICULTIES,PATH_LENGTH,towerStats,upgradeCost,sellValue,waveDefinition} from './game.js';
+import {Game,PADS,TYPES,ENEMIES,TARGETING,STRIKE,DIFFICULTIES,PATH_LENGTH,canStrikeAt,towerStats,upgradeCost,sellValue,waveDefinition} from './game.js';
 import {Renderer,drawTowerIcon} from './render.js';
 import {World3D,renderTowerIcons} from './3d/world.js';
 import {AudioEngine} from './audio.js';
@@ -81,12 +81,14 @@ function persistBest(){
 }
 
 // ————— Renderer —————
+const groundAt=event=>{const r=canvas.getBoundingClientRect();return renderer.pickGround(event.clientX-r.left,event.clientY-r.top);};
+const strikeSpot=point=>point&&canStrikeAt(point.x,point.y)?point:null;
 function bindCanvas(){
   const local=event=>{const r=canvas.getBoundingClientRect();return [event.clientX-r.left,event.clientY-r.top];};
   canvas.addEventListener('mapresize',positionPads);
   canvas.addEventListener('pointermove',event=>{
     const [x,y]=local(event);
-    if(aiming){renderer.aim=renderer.pickGround(x,y);canvas.style.cursor='crosshair';hoverPad=null;renderer.hover=null;return;}
+    if(aiming){renderer.aim=strikeSpot(renderer.pickGround(x,y));canvas.style.cursor='crosshair';hoverPad=null;renderer.hover=null;return;}
     if(renderer.kind==='3d'&&event.buttons)return;
     const pad=renderer.hitPad(x,y);hoverPad=pad?.id??null;renderer.hover=hoverPad;canvas.style.cursor=pad?'pointer':renderer.kind==='3d'?'grab':'default';
   });
@@ -147,8 +149,10 @@ function activatePad(id){
 }
 const padButtons=PADS.map(p=>{
   const button=document.createElement('button');button.className='pad-control';button.dataset.pad=p.id;button.title=t('pad.title',{number:String(p.id+1).padStart(2,'0')});
-  button.addEventListener('click',()=>activatePad(p.id));
-  const focus=()=>{hoverPad=p.id;renderer.hover=p.id;};
+  // While aiming a strike a pad is just a spot on the map: a pointer click aims where it lands, keyboard activation aims at the pad.
+  button.addEventListener('click',event=>{if(aiming){fireStrikeAt(event.detail?groundAt(event):p);return;}activatePad(p.id);});
+  button.addEventListener('pointermove',event=>{if(aiming)renderer.aim=strikeSpot(groundAt(event));});
+  const focus=()=>{if(aiming){renderer.aim=p;return;}hoverPad=p.id;renderer.hover=p.id;};
   button.addEventListener('pointerenter',focus);button.addEventListener('focus',focus);
   button.addEventListener('pointerleave',()=>{hoverPad=null;renderer.hover=null;});
   button.addEventListener('blur',()=>{hoverPad=null;renderer.hover=null;});
@@ -179,7 +183,7 @@ function toggleStrike(){
   aiming=true;buildType=null;renderer.buildType=null;lastSelection='';toast('toast.strikeAim');updateHud();
 }
 function fireStrikeAt(point){
-  if(!point){toast('toast.strikeMiss');return;}
+  if(!strikeSpot(point)){toast('toast.strikeMiss');return;}
   if(game.activateStrike(point.x,point.y)){cancelAim();banner('banner.strike','banner.strikeKicker');}
   else if(game.paused)toast('phase.paused');
   updateHud();

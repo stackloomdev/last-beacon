@@ -41,6 +41,8 @@ export const TARGETING = ['first','strong','close'];
 export const OVERDRIVE = {duration:6, cooldown:35, rate:1.8};
 // The lighthouse focuses its lamp on one spot: a short charge, then damage scaled to the current wave and a brief dazzle.
 export const STRIKE = {cooldown:45, delay:.8, radius:1.35, damage:110, stun:1.2, bossStun:.45};
+// Strikes must land on the map. Targets beyond it are rejected rather than moved, so the blast always lands on the marker.
+export const canStrikeAt=(x,y)=>Number.isFinite(x)&&Number.isFinite(y)&&x>=-.5&&x<=13.5&&y>=-.5&&y<=11.5;
 export const ENDLESS = {growth:1.06, gridLevels:10};
 const segments = PATH.slice(1).map((p,i)=>({a:PATH[i],b:p,len:Math.hypot(p[0]-PATH[i][0],p[1]-PATH[i][1])}));
 export const PATH_LENGTH = segments.reduce((s,p)=>s+p.len,0);
@@ -150,8 +152,7 @@ export class Game {
     this.overdrive=OVERDRIVE.duration;this.overdriveCooldown=OVERDRIVE.cooldown;this.emit('overdrive');return true;
   }
   activateStrike(x,y) {
-    if(this.phase!=='wave'||this.paused||this.strikeCooldown>0||!Number.isFinite(x)||!Number.isFinite(y))return false;
-    x=Math.max(-.5,Math.min(13.5,x));y=Math.max(-.5,Math.min(11.5,y));
+    if(this.phase!=='wave'||this.paused||this.strikeCooldown>0||!canStrikeAt(x,y))return false;
     this.strikes.push({x,y,delay:STRIKE.delay});this.strikeCooldown=STRIKE.cooldown;this.emit('strike',{x,y});return true;
   }
   continueEndless() {
