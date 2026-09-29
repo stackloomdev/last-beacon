@@ -1,18 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Game} from '../src/game.js';
+import {Game,PATH_LENGTH,pathPosition} from '../src/game.js';
 
 // A finite-budget campaign: every action uses the same public methods as the UI.
 // This catches accidental unwinnable curves, resource bugs, and stalled waves.
-export function runCampaign(deploy,options={}){
-  const game=new Game(options),history=[];
+// The keeper lowers the beam just ahead of the leading enemy whenever it has lifted, and at least every eight seconds.
+function keeper(){
+  let timer=0;
+  return g=>{
+    timer-=.05;if(!g.enemies.length||(timer>0&&g.beam.spot))return;
+    timer=8;const lead=g.enemies.reduce((a,b)=>a.distance>b.distance?a:b),p=pathPosition(Math.min(PATH_LENGTH,lead.distance+.8));
+    g.aimBeam(p.x,p.y);
+  };
+}
+export function runCampaign(deploy,{beam=true,...options}={}){
+  const game=new Game(options),history=[],light=beam?keeper():()=>{};
   for(let wave=1;wave<=10;wave++){
     deploy(game,wave);
     assert.equal(game.startWave(),true);
     let ticks=0;
     while(game.phase==='wave'&&ticks++<10000){
       if(game.overdriveCooldown<=0&&game.enemies.length>4)game.activateOverdrive();
-      game.tick(.05);game.events.length=0;
+      light(game);game.tick(.05);game.events.length=0;
     }
     assert.ok(ticks<10000,`Wave ${wave} never completed`);
     assert.ok(game.credits>=0);assert.ok(game.powerUsed<=game.capacity);
@@ -42,6 +51,10 @@ test('a mixed defense can complete all ten waves within its actual budget',()=>{
   // 227 original enemies, with splitters replacing 13 of them and each splitter breaking into two spawnlings.
   assert.equal(game.phase,'won');assert.equal(history.length,10);assert.equal(game.kills,247);assert.equal(game.powerUsed,45);
   assert.ok(game.elapsed>300&&game.elapsed<600);
+});
+test('the same defense falls in the final night when the keeper never lowers the beam',()=>{
+  const {game,history}=runCampaign(mixedDefense,{beam:false});
+  assert.equal(game.phase,'lost');assert.equal(game.wave,10);assert.equal(history[8].hp,100,'daylight and dusk waves are unaffected');
 });
 test('the starter turret alone cannot complete the campaign',()=>{
   const {game}=runCampaign(()=>{});assert.equal(game.phase,'lost');assert.ok(game.wave<7);

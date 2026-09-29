@@ -96,5 +96,8 @@ export class AudioEngine {
     else if(kind==='thunder'){const v=.08+.1*gain;this.noise(2.8,{frequency:420,to:60,volume:v,delay,attack:.08,pan});this.noise(1.2,{frequency:1400,to:200,volume:v*.6,delay:delay+.02,pan});this.tone(40,2.2,'sine',v*.8,delay,28,pan);}
     else if(kind==='firework'){if(this.limited('firework',.2))return;this.noise(.12,{frequency:2500,to:400,volume:.05,pan});for(let i=0;i<5;i++)this.noise(.03,{type:'highpass',frequency:5000,volume:.012,delay:.15+i*.06+Math.random()*.04,pan});}
     else if(kind==='endless'){this.horn(82,2.2,.07);}
+    // The lamp housing turns and the beam settles onto the island; lifting it again sighs back up.
+    else if(kind==='beam'){if(this.limited('beam',.12))return;this.noise(.28,{type:'bandpass',frequency:900,to:380,q:1.3,volume:.03,pan});this.tone(190,.4,'sine',.035,0,120,pan);this.tone(660,.3,'sine',.012,.06,760,pan);}
+    else if(kind==='beamLift'){this.tone(300,.45,'sine',.016,0,420);}
   }
 }

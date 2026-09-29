@@ -1,4 +1,4 @@
-import {PADS,PATH,SOURCE,TYPES,ENEMIES,STRIKE,towerStats,dist} from './game.js';
+import {PADS,PATH,SOURCE,TYPES,ENEMIES,STRIKE,BEAM,DARK,PATH_LENGTH,towerStats,dist,pathPosition,isNightWave} from './game.js';
 import {t} from './i18n.js';
 
 const TAU=Math.PI*2;
@@ -13,24 +13,28 @@ const onPath=(x,y)=>pathCells.has(`${x},${y}`);
 const COLORS={grass:['#788f69','#81966e','#7c9268','#869a73','#748c66','#889c72'],path:['#c7b18b','#c4ad84','#cfb991','#cbb68c']};
 
 export class Renderer {
-  constructor(canvas,game) {
-    this.kind='2d';this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.game=game;this.aim=null;
-    this.time=0;this.hover=null;this.selected=null;this.buildType=null;this.grid=true;this.particles=[];this.shake=0;
-    this.cache=document.createElement('canvas');this.clouds=[];
+  constructor(canvas,game,{insets=null}={}) {
+    this.kind='2d';this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.game=game;this.aim=null;this.highlight=null;
+    this.time=0;this.hover=null;this.selected=null;this.buildType=null;this.grid=true;this.particles=[];this.shake=0;this.dark=0;this.rings=[];
+    this.insets={top:0,right:0,bottom:0,left:0,...insets};
+    this.cache=document.createElement('canvas');this.shade=document.createElement('canvas');this.clouds=[];
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(canvas);
     this.resize();
   }
   resize() {
     const r=this.canvas.getBoundingClientRect();this.w=r.width;this.h=r.height;this.dpr=Math.min(window.devicePixelRatio||1,2);
     this.canvas.width=Math.round(this.w*this.dpr);this.canvas.height=Math.round(this.h*this.dpr);
-    this.s=Math.min(this.w/24.5,this.h/15.4);
-    this.ox=this.w*.50;this.oy=this.h*.50;
-    this.cache.width=this.canvas.width;this.cache.height=this.canvas.height;
+    // Fit the island into the open space between the HUD bars.
+    const i=this.insets,w=Math.max(120,this.w-i.left-i.right),h=Math.max(120,this.h-i.top-i.bottom);
+    this.s=Math.min(w/24.5,h/15.4);
+    this.ox=i.left+w*.5;this.oy=i.top+h*.5;
+    this.cache.width=this.shade.width=this.canvas.width;this.cache.height=this.shade.height=this.canvas.height;
     this.cacheCtx=this.cache.getContext('2d');this.cacheCtx.setTransform(this.dpr,0,0,this.dpr,0,0);
     const original=this.ctx;this.ctx=this.cacheCtx;this.drawTerrain();this.ctx=original;
     this.canvas.dispatchEvent(new CustomEvent('mapresize'));
   }
-  p(x,y,z=0){return {x:this.ox+(x-6.5-y+5.5)*this.s,y:this.oy+((x-6.5)+(y-5.5))*this.s*.52-z*this.s};}
+  setInsets(insets){this.insets={...this.insets,...insets};this.resize();}
+  p(x,y,z=0){return {x:this.ox+(x-6.5-y+5.5)*this.s,y:this.oy+((x-6.5)+(y-5.5))*this.s*.52-z*this.s,behind:false};}
   // Inverse of the isometric projection on the ground plane.
   pickGround(px,py){const u=(px-this.ox)/this.s,v=(py-this.oy+.3*this.s)/(this.s*.52);return {x:(u+v+13)/2,y:(v-u+11)/2};}
   consumeClick(){return false;}
@@ -42,7 +46,10 @@ export class Renderer {
     if(e.type==='split')this.burst(e.x,e.y,'#b8ff72',10);
     if(e.type==='strikeHit'){this.burst(e.x,e.y,'#ffe2a0',30);this.shake=1;}
     if(e.type==='leak')this.shake=1;
+    if(e.type==='beam')this.rings.push({x:e.x,y:e.y,t:0});
   }
+  // Iso ellipse for a circle of radius r (tiles) on the ground.
+  groundEllipse(x,y,r,z=.32){const p=this.p(x,y,z);return {x:p.x,y:p.y,rx:r*this.s*Math.SQRT2,ry:r*this.s*.52*Math.SQRT2};}
   poly(points,fill,stroke,width=1) {
     const c=this.ctx;c.beginPath();points.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.closePath();
     if(fill){c.fillStyle=fill;c.fill();}if(stroke){c.strokeStyle=stroke;c.lineWidth=width;c.stroke();}
@@ -139,11 +146,19 @@ export class Renderer {
     const glow=c.createRadialGradient(light.x,light.y,1,light.x,light.y,s*1.55);
     glow.addColorStop(0,'#ffe6a284');glow.addColorStop(.35,'#f8cd6520');glow.addColorStop(1,'#f7c46400');
     this.circle(light,s*1.55,glow);this.circle(light,s*.085,'#fff1be');
-    const angle=this.time*.17;
+    const spot=this.game.beam.spot;
     c.save();c.globalCompositeOperation='screen';
-    const beam=c.createRadialGradient(light.x,light.y,s*.1,light.x,light.y,s*6);
-    beam.addColorStop(0,'#ffdda32d');beam.addColorStop(1,'#ffdda300');
-    this.poly([light,{x:light.x+Math.cos(angle-.1)*s*7,y:light.y+Math.sin(angle-.1)*s*3},{x:light.x+Math.cos(angle+.1)*s*7,y:light.y+Math.sin(angle+.1)*s*3}],beam);c.restore();
+    if(spot&&this.game.beam.charge>.2){
+      // Lowered beam: a wedge from the lamp that widens into the pool of light.
+      const e=this.groundEllipse(spot.x,spot.y,BEAM.radius),a=Math.atan2(e.y-light.y,e.x-light.x),n={x:-Math.sin(a),y:Math.cos(a)},w=e.rx*.8;
+      const beam=c.createLinearGradient(light.x,light.y,e.x,e.y);beam.addColorStop(0,'#ffe6b066');beam.addColorStop(1,'#ffe6b014');
+      this.poly([light,{x:e.x+n.x*w,y:e.y+n.y*w*.6},{x:e.x-n.x*w,y:e.y-n.y*w*.6}],beam);
+    } else {
+      const angle=this.time*.17,beam=c.createRadialGradient(light.x,light.y,s*.1,light.x,light.y,s*6);
+      beam.addColorStop(0,'#ffdda32d');beam.addColorStop(1,'#ffdda300');
+      this.poly([light,{x:light.x+Math.cos(angle-.1)*s*7,y:light.y+Math.sin(angle-.1)*s*3},{x:light.x+Math.cos(angle+.1)*s*7,y:light.y+Math.sin(angle+.1)*s*3}],beam);
+    }
+    c.restore();
     // Small door and entry path ground the landmark in the island.
     this.box(x-.05,y+.35,.5,.16,.035,.31,'#55665a','#536254','#536254');
     for(let i=0;i<3;i++)this.box(x-.05,y+.52+i*.16,.2,.36,.17,.08+(2-i)*.05,'#b5b49b','#939b84','#818f79');
@@ -175,6 +190,7 @@ export class Renderer {
       this.ellipse(this.p(t.x,t.y,z+.84),s*.2,s*.085,'#c9ced6','#8f95a0',1.5);
       this.circle(this.p(t.x,t.y,z+.9),s*.05,t.powered||ghost?'#e3dcff':'#8a8a95');
     } else {
+      if(t.powered&&this.dark>.05&&!ghost){const lamp=this.p(t.x,t.y,z+.9),g=c.createRadialGradient(lamp.x,lamp.y,0,lamp.x,lamp.y,s*.5);g.addColorStop(0,`rgba(255,214,150,${.7*this.dark})`);g.addColorStop(1,'rgba(255,214,150,0)');this.circle(lamp,s*.5,g);}
       this.box(t.x,t.y,z+.85,.66,.13,.10,'#ccd8af','#a9bd94','#879f7d');
       this.circle(this.p(t.x,t.y,z+1.08),s*.075,t.connected?'#e9f6b0':'#737e68');
       for(const d of [-.24,.24])this.line([this.p(t.x+d,t.y,z+.95),this.p(t.x+d,t.y,z+1.10)],'#465f4a',2);
@@ -215,7 +231,7 @@ export class Renderer {
   burst(x,y,color,count=12) {
     for(let i=0;i<count;i++)this.particles.push({x,y,z:.5,vx:(rnd(i+this.time,x)-.5)*2,vy:(rnd(i+this.time,y+1)-.5)*2,vz:1+rnd(i,this.time)*2,life:.45+rnd(i,this.time)*.5,color});
   }
-  draw(dt) {
+  draw(dt,realDt=dt) {
     const c=this.ctx,s=this.s,g=this.game;
     this.time+=dt;if(!s)return;
     c.setTransform(this.dpr,0,0,this.dpr,0,0);
@@ -235,8 +251,18 @@ export class Renderer {
       this.line([a,b],'#3c635680',4);this.line([a,b],edge.to.powered?'#d3df9ca6':'#dc987b88',1.3);
       if(edge.to.powered){const t=(this.time*.23+edge.to.id*.14)%1;this.circle({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t},1.8,'#e6ecba');}
     }
+    if(g.phase==='build'&&(g.endless||g.wave<10)) {
+      const next=g.waveDef(g.wave+1),color=next.units.some(([type])=>type==='boss')?'255,146,116':isNightWave(g.wave+1)?'168,189,255':'246,217,154';
+      for(let i=0;i<30;i++){
+        const d=(i*PATH_LENGTH/30+this.time*.9)%PATH_LENGTH,a=pathPosition(d),b=pathPosition(Math.min(PATH_LENGTH,d+.2)),pa=this.p(a.x,a.y,.18),pb=this.p(b.x,b.y,.18);
+        const k=Math.atan2(pb.y-pa.y,pb.x-pa.x),alpha=Math.min(1,d/1.2,(PATH_LENGTH-d)/1.4)*(.35+.5*Math.max(0,Math.sin(d*.8-this.time*2.4)));
+        const r=s*.16,tip={x:pa.x+Math.cos(k)*r,y:pa.y+Math.sin(k)*r};
+        this.line([{x:pa.x+Math.cos(k+2.5)*r,y:pa.y+Math.sin(k+2.5)*r},tip,{x:pa.x+Math.cos(k-2.5)*r,y:pa.y+Math.sin(k-2.5)*r}],`rgba(${color},${alpha})`,2);
+      }
+    }
     for(const pad of PADS) {
       const t=g.towers.find(t=>t.pad===pad.id),p=this.p(pad.x,pad.y,.32),active=this.hover===pad.id||this.selected===pad.id;
+      if(!t&&this.highlight===pad.id){const k=.5+.5*Math.sin(this.time*4);this.ellipse(p,s*(.46+.08*k),s*(.23+.04*k),`rgba(245,215,149,${.18+.2*k})`,'#f5d795',2);}
       if(!t||active) {
         this.ellipse(p,s*.38,s*.19,null,active?'#f1d697':this.buildType?'#d1d8afa0':'#b7c1a260',active?1.8:1);
         if(!t){this.line([{x:p.x-3,y:p.y},{x:p.x+3,y:p.y}],active?'#f5dea5':'#becbb0',1);this.line([{x:p.x,y:p.y-3},{x:p.x,y:p.y+3}],active?'#f5dea5':'#becbb0',1);}
@@ -247,6 +273,16 @@ export class Renderer {
       const def=chosen?towerStats(chosen):TYPES[this.buildType],r=chosen?.type==='relay'||this.buildType==='relay'&&!chosen?4.8:def.range;
       if(r)this.range(target.x,target.y,r,def.color);
       if(this.buildType&&!chosen){const parent=[{...SOURCE,type:'source'},...g.towers.filter(t=>t.connected)].find(t=>dist(t,target)<=Math.max(t.type==='source'?SOURCE.radius:t.type==='relay'?4.8:3,this.buildType==='relay'?4.8:3));if(parent)this.line([this.p(parent.x,parent.y,.4),this.p(target.x,target.y,.4)],'#e7e9b4',1,[4,4]);}
+    }
+    if(target&&chosen&&chosen.type!=='relay'&&(g.isNight()||g.phase==='build'&&isNightWave(g.wave+1))){
+      const r=towerStats(chosen).range*DARK.sight,pts=Array.from({length:49},(_,i)=>this.p(target.x+Math.cos(i/48*TAU)*r,target.y+Math.sin(i/48*TAU)*r,.32));this.line(pts,'#dfe6ffb0',1.2,[3,5]);
+    }
+    const spot=g.beam.spot,glow=spot?Math.min(1,g.beam.charge):0;
+    if(glow>0){
+      const e=this.groundEllipse(spot.x,spot.y,BEAM.radius);c.save();c.globalCompositeOperation='screen';
+      const pool=c.createRadialGradient(e.x,e.y,0,e.x,e.y,e.rx);pool.addColorStop(0,`rgba(255,232,180,${.5*glow})`);pool.addColorStop(.7,`rgba(255,226,160,${.22*glow})`);pool.addColorStop(1,'rgba(255,226,160,0)');
+      c.translate(e.x,e.y);c.scale(1,e.ry/e.rx);c.translate(-e.x,-e.y);this.circle({x:e.x,y:e.y},e.rx,pool);c.restore();
+      this.ellipse(e,e.rx,e.ry,null,`rgba(255,230,176,${.35*glow})`,1);
     }
     const scenery=[];
     for(let x=0;x<14;x++)for(let y=0;y<12;y++) {
@@ -277,6 +313,20 @@ export class Renderer {
     }
     for(const strike of g.strikes||[]){const p=this.p(strike.x,strike.y,.3),k=1-strike.delay/STRIKE.delay;this.ellipse(p,s*STRIKE.radius*(1-k*.5),s*STRIKE.radius*.52*(1-k*.5),null,'#ffe2a0',1+2*k);}
     if(this.aim){const r=STRIKE.radius,pts=Array.from({length:49},(_,i)=>this.p(this.aim.x+Math.cos(i/48*TAU)*r,this.aim.y+Math.sin(i/48*TAU)*r,.32));this.poly(pts,'#ffe7a31a','#ffe7a3',1.5);}
+    this.dark+=((g.isNight()?.58:0)-this.dark)*Math.min(1,realDt*2);
+    if(this.dark>.01){
+      const x=this.shade.getContext('2d');x.setTransform(this.dpr,0,0,this.dpr,0,0);x.globalCompositeOperation='source-over';x.clearRect(0,0,this.w,this.h);
+      x.fillStyle=`rgba(6,12,30,${this.dark})`;x.fillRect(0,0,this.w,this.h);x.globalCompositeOperation='destination-out';
+      const hole=(e,strength=1)=>{x.save();x.translate(e.x,e.y);x.scale(1,e.ry/e.rx);const grad=x.createRadialGradient(0,0,0,0,0,e.rx);grad.addColorStop(0,`rgba(0,0,0,${strength})`);grad.addColorStop(.65,`rgba(0,0,0,${strength*.8})`);grad.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=grad;x.beginPath();x.arc(0,0,e.rx,0,TAU);x.fill();x.restore();};
+      if(glow>0)hole(this.groundEllipse(spot.x,spot.y,BEAM.radius*1.15),glow);
+      hole(this.groundEllipse(SOURCE.x,SOURCE.y,DARK.glow*1.1),.9);
+      for(const t of g.towers)if(t.type==='relay'&&t.powered)hole(this.groundEllipse(t.x,t.y,DARK.lamp*1.1),.85);
+      c.drawImage(this.shade,0,0,this.w,this.h);
+      // Eyes still glint in the dark.
+      for(const e of g.enemies)if(!e.seen){const p=this.p(e.x,e.y,.62);this.circle({x:p.x-2,y:p.y},1.3,'#ffcf8a');this.circle({x:p.x+2,y:p.y},1.3,'#ffcf8a');}
+    }
+    for(const r of this.rings){r.t+=dt;const k=Math.min(1,r.t/.55),e=this.groundEllipse(r.x,r.y,BEAM.radius*(.3+.7*k));this.ellipse(e,e.rx,e.ry,null,`rgba(255,230,176,${1-k})`,2);}
+    this.rings=this.rings.filter(r=>r.t<.55);
     if(!g.paused)for(const p of this.particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;p.vz-=6*dt;}
     this.particles=this.particles.filter(p=>p.life>0);
     for(const part of this.particles){c.globalAlpha=Math.min(1,part.life*2);this.circle(this.p(part.x,part.y,Math.max(.2,part.z)),2,part.color);}c.globalAlpha=1;

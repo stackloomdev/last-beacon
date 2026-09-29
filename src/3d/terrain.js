@@ -95,7 +95,7 @@ const C=hex=>new THREE.Color(hex);
 const PALETTE={grassA:C('#4d6a35'),grassB:C('#68853f'),grassC:C('#7f9150'),dry:C('#9a955d'),road:C('#8c7658'),roadLight:C('#a58f6b'),rut:C('#6d5b45'),
   gravel:C('#8f8d7f'),sand:C('#d3c196'),wetSand:C('#a39170'),rock:C('#7b766b'),rockDark:C('#5f5b53'),seabed:C('#b8a67c'),deep:C('#4f5a52'),stone:C('#9e9c8f')};
 
-export const MAX_DECALS=16;
+export const MAX_DECALS=16,MAX_LAMPS=8;
 export function createTerrain(field,quality) {
   const step=quality==='high'?.085:quality==='medium'?.12:.16;
   const w=GRID.x1-GRID.x0,d=GRID.y1-GRID.y0,sx=Math.round(w/step),sy=Math.round(d/step);
@@ -124,13 +124,15 @@ export function createTerrain(field,quality) {
   const detail=detailTexture();
   const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.93,metalness:0,map:detail,bumpMap:detail,bumpScale:1.4});
   const uniforms={uTime:{value:0},uWet:{value:0},uSun:{value:1},uCloud:{value:0},uRange:{value:new THREE.Vector4(0,0,0,0)},uRangeColor:{value:new THREE.Color('#f1d697')},
-    uAim:{value:new THREE.Vector4(0,0,0,0)},uAimColor:{value:new THREE.Color('#ffe7a3')},uDecals:{value:Array.from({length:MAX_DECALS},()=>new THREE.Vector4())}};
+    uAim:{value:new THREE.Vector4(0,0,0,0)},uAimColor:{value:new THREE.Color('#ffe7a3')},uDecals:{value:Array.from({length:MAX_DECALS},()=>new THREE.Vector4())},
+    uBeam:{value:new THREE.Vector4(0,0,0,0)},uBeamColor:{value:new THREE.Color('#ffe8b8')},uLamps:{value:Array.from({length:MAX_LAMPS},()=>new THREE.Vector4())},uLampColor:{value:new THREE.Color('#ffc57a')},
+    uSight:{value:new THREE.Vector4(0,0,0,0)}};
   mat.onBeforeCompile=shader=>{
     Object.assign(shader.uniforms,uniforms);
     shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vGround;')
       .replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=(modelMatrix*vec4(transformed,1.)).xyz;');
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-varying vec3 vGround;uniform float uTime,uWet,uSun,uCloud;uniform vec4 uRange,uAim;uniform vec3 uRangeColor,uAimColor;uniform vec4 uDecals[${MAX_DECALS}];
+varying vec3 vGround;uniform float uTime,uWet,uSun,uCloud;uniform vec4 uRange,uAim,uBeam,uSight;uniform vec3 uRangeColor,uAimColor,uBeamColor,uLampColor;uniform vec4 uDecals[${MAX_DECALS}],uLamps[${MAX_LAMPS}];
 float ringMask(vec2 p,vec4 r,float w){float d=length(p-r.xy);return (1.-smoothstep(w*.5,w,abs(d-r.z)))*step(.01,r.z);}
 float caustic(vec2 p){p*=2.3;float t=uTime*.55;float c=sin(p.x+t)*sin(p.y*1.3-t*.8)+sin((p.x+p.y)*1.7+t*1.3)*.6+sin(length(p*.9)*2.1-t)*.4;return pow(max(0.,c*.5),3.);}`)
       .replace('#include <color_fragment>',`#include <color_fragment>
@@ -145,7 +147,14 @@ diffuseColor.rgb*=1.-.3*uCloud*smoothstep(.15,.75,cl);`)
 {vec2 p=vGround.xz;float fill=(1.-step(uRange.z,length(p-uRange.xy)))*step(.01,uRange.z);
 totalEmissiveRadiance+=uRangeColor*(ringMask(p,uRange,.06)*.9+fill*.07)*uRange.w;
 float pulse=.65+.35*sin(uTime*7.);float aimFill=(1.-smoothstep(uAim.z*.2,uAim.z,length(p-uAim.xy)))*step(.01,uAim.z);
-totalEmissiveRadiance+=uAimColor*(ringMask(p,uAim,.09)*1.4*pulse+aimFill*.2)*uAim.w;}`);
+totalEmissiveRadiance+=uAimColor*(ringMask(p,uAim,.09)*1.4*pulse+aimFill*.2)*uAim.w;
+// Pools of light: the lowered beam and relay lamps light the ground they fall on. A faint rim marks where the beam's effect ends.
+float bd=length(p-uBeam.xy)/max(uBeam.z,.001),on=step(.01,uBeam.z);
+totalEmissiveRadiance+=(diffuseColor.rgb*(1.-smoothstep(.3,1.,bd))*1.7+(1.-smoothstep(0.,.04,abs(bd-1.)))*.1)*uBeamColor*uBeam.w*on;
+for(int i=0;i<${MAX_LAMPS};i++){vec4 l=uLamps[i];if(l.w<=0.)continue;float d=length(p-l.xy)/l.z;totalEmissiveRadiance+=diffuseColor.rgb*uLampColor*(1.-smoothstep(.2,1.,d))*l.w*2.6;}
+// Night sight: the dashed inner ring a tower can make out without light.
+float dash=step(.5,fract(atan(p.y-uSight.y,p.x-uSight.x)*3.8197));
+totalEmissiveRadiance+=uRangeColor*ringMask(p,uSight,.05)*dash*.85*uSight.w;}`);
   };
   const mesh=new THREE.Mesh(geo,mat);mesh.receiveShadow=true;mesh.name='terrain';
   return {mesh,uniforms,dispose(){geo.dispose();mat.dispose();detail.dispose();}};

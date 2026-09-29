@@ -148,6 +148,11 @@ export function buildTower(type,level,mats,{ghost=false,color='#ffffff'}={}) {
     m.push(part(new THREE.BoxGeometry(.64,.035,.04),'#5f6b60',{p:[0,1,0]}),part(new THREE.BoxGeometry(.2,.03,.03),'#5f6b60',{p:[0,1.07,0]}));
     for(const x of [.28,-.28])for(let i=0;i<3;i++)p.push(part(new THREE.CylinderGeometry(.03,.03,.016,10),'#d3e3cb',{p:[x,.975-i*.028,0]}));
     glowParts.push(part(new THREE.SphereGeometry(.032,10,8),'#ffffff',{p:[0,1.12,0]}));
+    // Floodlights at both ends of the crossbar light the ground around the relay at night.
+    const bulbs=[];
+    for(const x of [.35,-.35]){m.push(part(new THREE.CylinderGeometry(.03,.05,.05,12),'#3a423d',{p:[x,1.005,0]}));bulbs.push(part(new THREE.SphereGeometry(.028,10,6,0,TAU,Math.PI/2,Math.PI/2),'#ffffff',{p:[x,.985,0]}));}
+    const lampMat=ghost?mats.ghost:new THREE.MeshStandardMaterial({color:'#3a3a32',emissive:new THREE.Color('#ffd592'),emissiveIntensity:0,roughness:.3});
+    root.add(new THREE.Mesh(merge(bulbs),lampMat));out.lampMat=lampMat;
     add(root,m,mats.metal);add(root,s,mats.stone);add(root,p,mats.paint);addGlow(root,glowParts);
     out.anchor.position.set(0,.93,0);out.anchors=[new THREE.Vector3(.28,.93,0),new THREE.Vector3(-.28,.93,0)];out.height=1.18;
   } else {

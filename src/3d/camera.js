@@ -1,8 +1,9 @@
 import * as THREE from '../../vendor/three.module.min.js';
 
 const DEG=Math.PI/180,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-export const VIEW={azimuth:45*DEG,elevation:47*DEG,zoom:1};
-const LIMITS={elevation:[22*DEG,80*DEG],zoom:[.42,1.45],x:[-7,6],z:[-5.5,5.5]};
+// Low enough that the island reads as a place with the sea running out behind it, high enough to read every pad.
+export const VIEW={azimuth:45*DEG,elevation:38*DEG,zoom:1};
+const LIMITS={elevation:[12*DEG,80*DEG],zoom:[.42,1.45],x:[-7,6],z:[-5.5,5.5]};
 
 // Orbit camera with damping. Pointer drags rotate (right button or two fingers pan), wheel and pinch zoom.
 export class CameraRig {
@@ -11,18 +12,37 @@ export class CameraRig {
     this.home=new THREE.Vector3(0,.3,0);this.target=this.home.clone();this.goalTarget=this.home.clone();
     this.azimuth=VIEW.azimuth;this.elevation=VIEW.elevation;this.zoom=VIEW.zoom;this.goal={...VIEW};this.fit=20;
     this.trauma=0;this.time=0;this.intro=0;this.pointers=new Map();this.suppressClick=false;this.enabled=true;
+    this.insets={top:0,right:0,bottom:0,left:0};this.bounds={x0:-.97,x1:.97,y0:-.95,y1:.93};this.shot=null;this.saved=null;this.soft=0;
     this.offset=new THREE.Vector3();this.look=new THREE.Vector3();this.tmp=new THREE.Vector3();
     const on=(type,fn,opts)=>{element.addEventListener(type,fn,opts);(this.off||=[]).push(()=>element.removeEventListener(type,fn,opts));};
     on('pointerdown',e=>this.down(e));on('pointermove',e=>this.move(e));on('pointerup',e=>this.up(e));on('pointercancel',e=>this.up(e,true));
-    on('wheel',e=>{if(!this.enabled)return;e.preventDefault();this.cancelIntro();this.goal.zoom=clamp(this.goal.zoom*Math.exp(e.deltaY*.0011),...LIMITS.zoom);},{passive:false});
+    on('wheel',e=>{if(!this.enabled)return;e.preventDefault();this.interrupt();this.goal.zoom=clamp(this.goal.zoom*Math.exp(e.deltaY*.0011),...LIMITS.zoom);},{passive:false});
     on('contextmenu',e=>e.preventDefault());
   }
-  cancelIntro(){this.intro=0;}
+  // Any direct input takes the camera back from the intro or a cinematic shot.
+  // A passing shot hands back the player's own framing; the closing shot of a watch simply stops where it is.
+  interrupt(){
+    this.intro=0;if(!this.shot)return;
+    const v=!this.shot.stay&&this.saved;this.shot=null;this.saved=null;
+    if(v){Object.assign(this.goal,{azimuth:this.nearestAzimuth(v.azimuth),elevation:v.elevation,zoom:v.zoom});this.goalTarget.fromArray(v.target);this.soft=1.2;}
+  }
+  cancelIntro(){this.interrupt();}
+  // A short cinematic move. It hands the view back afterwards unless it is the final word of a watch.
+  play(view,{hold=2.4,rate=2.2,stay=false}={}) {
+    if(this.calm)return;
+    if(!this.shot)this.saved=this.snapshot();
+    if(view.azimuth!==undefined)this.goal.azimuth=this.nearestAzimuth(view.azimuth);
+    if(view.elevation!==undefined)this.goal.elevation=view.elevation;
+    if(view.zoom!==undefined)this.goal.zoom=view.zoom;
+    if(view.target)this.goalTarget.copy(view.target);
+    this.intro=0;this.shot={t:0,hold,rate,stay};
+  }
   playIntro() {
     this.azimuth=this.goal.azimuth-1.25;this.elevation=13*DEG;this.zoom=2.6;this.intro=3.4;
   }
-  snapshot(){return {azimuth:this.goal.azimuth,elevation:this.goal.elevation,zoom:this.goal.zoom,target:this.goalTarget.toArray()};}
-  restore(view){Object.assign(this.goal,{azimuth:view.azimuth,elevation:view.elevation,zoom:view.zoom});this.goalTarget.fromArray(view.target);
+  // During a cinematic shot the player's own view is the one worth keeping.
+  snapshot(){if(this.saved)return {...this.saved,target:[...this.saved.target]};return {azimuth:this.goal.azimuth,elevation:this.goal.elevation,zoom:this.goal.zoom,target:this.goalTarget.toArray()};}
+  restore(view){this.shot=null;this.saved=null;Object.assign(this.goal,{azimuth:view.azimuth,elevation:view.elevation,zoom:view.zoom});this.goalTarget.fromArray(view.target);
     this.azimuth=view.azimuth;this.elevation=view.elevation;this.zoom=view.zoom;this.target.copy(this.goalTarget);this.intro=0;}
   reset(){this.cancelIntro();Object.assign(this.goal,{...VIEW,azimuth:this.nearestAzimuth(VIEW.azimuth)});this.goalTarget.copy(this.home);}
   nearestAzimuth(a){return a+Math.round((this.goal.azimuth-a)/(Math.PI*2))*Math.PI*2;}
@@ -31,6 +51,7 @@ export class CameraRig {
   shake(amount){if(!this.calm)this.trauma=Math.min(1,this.trauma+amount);}
   down(e) {
     if(!this.enabled)return;
+    this.interrupt();
     if(this.pointers.size===0)this.suppressClick=false;
     this.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,button:e.button,type:e.pointerType,pan:e.button===2||e.button===1||e.shiftKey||e.ctrlKey,dragging:false});
     if(e.button===2||e.button===1)e.preventDefault();
@@ -65,8 +86,15 @@ export class CameraRig {
   // The browser still fires "click" after a drag; the app asks once per click whether to ignore it.
   consumeClick(){const s=this.suppressClick;this.suppressClick=false;return s;}
   dragging(){for(const p of this.pointers.values())if(p.dragging)return true;return false;}
-  resize(aspect) {
-    this.camera.aspect=aspect;this.camera.updateProjectionMatrix();
+  setInsets(insets){this.insets={top:0,right:0,bottom:0,left:0,...insets};}
+  resize(w,h) {
+    // The HUD covers the edges of the screen: shift the image so the island sits in the open space between the bars.
+    const i=this.insets,dx=(i.left-i.right)/2,dy=(i.top-i.bottom)/2;
+    this.camera.aspect=w/h;
+    if(dx||dy)this.camera.setViewOffset(w,h,-dx,-dy,w,h);else this.camera.clearViewOffset();
+    this.camera.updateProjectionMatrix();
+    const mx=.03*(w-i.left-i.right)/w,my=.03*(h-i.top-i.bottom)/h;
+    this.bounds={x0:-1+2*i.left/w+mx,x1:1-2*i.right/w-mx,y0:-1+2*i.bottom/h+my,y1:1-2*i.top/h-my};
     // Find the distance at which the whole playfield fits the default view, for any aspect ratio.
     let lo=4,hi=80;
     for(let i=0;i<22;i++){const mid=(lo+hi)/2;(this.fits(mid)?hi=mid:lo=mid);}
@@ -74,7 +102,8 @@ export class CameraRig {
   }
   fits(distance) {
     this.place(VIEW.azimuth,VIEW.elevation,distance,this.home);this.camera.updateMatrixWorld(true);
-    for(const p of this.fitPoints){this.tmp.copy(p).project(this.camera);if(Math.abs(this.tmp.x)>.97||this.tmp.y>.93||this.tmp.y<-.95||this.tmp.z>1)return false;}
+    const b=this.bounds;
+    for(const p of this.fitPoints){this.tmp.copy(p).project(this.camera);if(this.tmp.x<b.x0||this.tmp.x>b.x1||this.tmp.y<b.y0||this.tmp.y>b.y1||this.tmp.z>1)return false;}
     return true;
   }
   place(azimuth,elevation,distance,target) {
@@ -83,7 +112,15 @@ export class CameraRig {
   }
   update(dt) {
     this.time+=dt;
-    const rate=this.intro>0?1.05:7,k=1-Math.exp(-dt*rate);this.intro=Math.max(0,this.intro-dt);
+    if(this.shot){
+      this.shot.t+=dt;
+      if(this.shot.t>this.shot.hold&&!this.shot.stay){
+        const v=this.saved;this.shot=null;this.saved=null;this.soft=1.8;
+        if(v){Object.assign(this.goal,{azimuth:this.nearestAzimuth(v.azimuth),elevation:v.elevation,zoom:v.zoom});this.goalTarget.fromArray(v.target);}
+      }
+    }
+    this.soft=Math.max(0,this.soft-dt);
+    const rate=this.intro>0?1.05:this.shot?this.shot.rate:this.soft>0?2.6:7,k=1-Math.exp(-dt*rate);this.intro=Math.max(0,this.intro-dt);
     this.azimuth+=(this.goal.azimuth-this.azimuth)*k;this.elevation+=(this.goal.elevation-this.elevation)*k;this.zoom+=(this.goal.zoom-this.zoom)*k;
     this.target.lerp(this.goalTarget,k);
     this.place(this.azimuth,this.elevation,this.fit*this.zoom,this.target);

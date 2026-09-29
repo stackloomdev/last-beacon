@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Game,PADS,PATH,PATH_LENGTH,pathPosition,towerStats,sellValue,waveDefinition,STRIKE,WAVES,canStrikeAt} from '../src/game.js';
+import {Game,PADS,PATH,PATH_LENGTH,pathPosition,towerStats,sellValue,waveDefinition,STRIKE,WAVES,canStrikeAt,BEAM,DARK,dist,isNightWave} from '../src/game.js';
 
 function advance(g,seconds){for(let t=0;t<seconds;t+=.05){g.tick(.05);g.events.length=0;}}
 function collect(g,seconds){const events=[];for(let t=0;t<seconds;t+=.05){g.tick(.05);events.push(...g.events);g.events.length=0;}return events;}
@@ -172,4 +172,57 @@ test('combat events carry map positions for visual effects',()=>{
     assert.ok(event,`missing ${type}`);assert.ok(Number.isFinite(event.x)&&Number.isFinite(event.y),type);
   }
   assert.deepEqual(events.filter(e=>e.type==='kill').map(e=>[e.enemyType,e.reward]),[['tank',20],['tank',20],['tank',20]]);
+});
+test('night skies arrive on waves 5, 6, 7 and 10 and recur in the endless tide',()=>{
+  assert.deepEqual(Array.from({length:10},(_,i)=>isNightWave(i+1)),[false,false,false,false,true,true,true,false,false,true]);
+  assert.deepEqual([11,12,13,14,15,16].map(isNightWave),[true,false,true,true,false,true]);
+  assert.deepEqual(WAVES.map(w=>w.sky),['dusk','sunset','gloaming','blue','night','night','deep','storm','drizzle','abyss']);
+  const g=new Game();assert.equal(g.isNight(),false);g.wave=4;g.startWave();assert.equal(g.isNight(),true);
+});
+test('the beam comes down before it lights, glides to new targets and only runs down during waves',()=>{
+  const g=new Game({starter:false});
+  assert.equal(g.aimBeam(20,4),false,'targets off the map are rejected');assert.equal(g.aimBeam(NaN,4),false);assert.equal(g.beam.spot,null);
+  assert.equal(g.aimBeam(2,4),true);assert.deepEqual(g.beam.spot,{x:2,y:4});
+  const e=place(g,'crawler',2);assert.equal(g.isLit(e),false,'the lamp is still coming down');
+  advance(g,BEAM.lower+.05);assert.equal(g.isLit(e),true);
+  advance(g,30);assert.ok(g.beam.spot,'between waves the beam waits');assert.equal(g.beam.hold,BEAM.hold);
+  g.aimBeam(2,8);g.tick(.05);assert.ok(Math.abs(g.beam.spot.y-(4+BEAM.speed*.05))<1e-9,'it glides at a limited speed');
+  advance(g,1);assert.deepEqual(g.beam.spot,{x:2,y:8});
+  g.startWave();g.queue=[];place(g,'tank',1);
+  const events=collect(g,BEAM.hold+.2);
+  assert.equal(g.beam.spot,null);assert.ok(events.some(e=>e.type==='beamLift'));
+  g.phase='lost';assert.equal(g.aimBeam(2,4),false);
+});
+test('towers hit lit enemies harder and lit enemies slow down, while the strike keeps its own damage',()=>{
+  const firstHit=(g,e)=>{for(let i=0;i<100&&e.hp===e.maxHp;i++){g.tick(.05);g.events.length=0;}return e.maxHp-e.hp;};
+  const plain=new Game({starter:false});plain.credits=1000;const gun=plain.build('gun',1).tower;plain.startWave();plain.queue=[];
+  const base=firstHit(plain,place(plain,'tank',14.5));assert.equal(base,towerStats(gun).damage);
+  const lit=new Game({starter:false});lit.credits=1000;lit.build('gun',1);
+  lit.aimBeam(7,4.5);advance(lit,BEAM.lower+.05);lit.startWave();lit.queue=[];const b=place(lit,'tank',14.5);
+  assert.equal(b.lit,true);assert.ok(Math.abs(firstHit(lit,b)-base*BEAM.bonus)<1e-9);
+  const walk=new Game({starter:false});walk.startWave();walk.queue=[];
+  const c=place(walk,'crawler',13,false);walk.aimBeam(7,5.2);advance(walk,.5);
+  const before=c.distance;walk.tick(.05);assert.ok(Math.abs(c.distance-before-c.speed*(1-BEAM.slow)*.05)<1e-9);
+  const strike=new Game({starter:false});strike.startWave();strike.queue=[];
+  const d=place(strike,'tank',9,false);assert.equal(strike.activateStrike(d.x,d.y),true);
+  assert.deepEqual(strike.beam.spot,{x:d.x,y:d.y});assert.equal(strike.beam.charge,1);
+  advance(strike,STRIKE.delay+.1);assert.ok(Math.abs(d.maxHp-d.hp-strike.strikeDamage())<1e-9);
+});
+test('at night towers only engage distant enemies that stand in light',()=>{
+  const g=new Game({starter:false});g.credits=1000;const gun=g.build('gun',1).tower,range=towerStats(gun).range;
+  g.wave=4;g.startWave();g.queue=[];
+  const dark=place(g,'crawler',13),near=place(g,'crawler',14.5),glow=place(g,'crawler',21.5);
+  assert.ok(dist(gun,dark)<range&&dist(gun,dark)>range*DARK.sight,'the dark enemy is in range but beyond night sight');
+  g.illuminate();
+  const visible=()=>g.enemies.filter(e=>e.hp>0&&dist(gun,e)<=range&&(e.seen||dist(gun,e)<=range*DARK.sight));
+  assert.equal(dark.seen,false);assert.deepEqual(visible(),[near,glow]);assert.equal(glow.seen,true,'the lighthouse lights the last stretch');
+  near.hp=0;glow.hp=0;assert.equal(g.pickTarget(gun,range),null);
+  g.aimBeam(dark.x,dark.y);advance(g,BEAM.lower+.05);assert.equal(dark.lit,true);assert.equal(g.pickTarget(gun,range),dark);
+  g.liftBeam();g.illuminate();assert.equal(g.pickTarget(gun,range),null);
+  const relay=g.build('relay',4).tower;assert.equal(relay.powered,true);g.illuminate();
+  assert.equal(dark.seen,true,'a powered relay lamp lights its surroundings');assert.equal(g.pickTarget(gun,range),dark);
+  g.sell(relay.id);g.illuminate();assert.equal(g.pickTarget(gun,range),null);
+  const boss=place(g,'boss',13.2);g.illuminate();assert.equal(boss.seen,true,'the colossus glows');assert.equal(g.pickTarget(gun,range),boss);
+  const day=new Game({starter:false});day.credits=1000;const dayGun=day.build('gun',1).tower;day.startWave();day.queue=[];
+  const far=place(day,'crawler',13);assert.equal(day.pickTarget(dayGun,range),far,'daylight hides nothing');
 });

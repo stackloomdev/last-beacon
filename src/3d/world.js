@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.min.js';
-import {PADS,SOURCE,TYPES,PATH,pathPosition,towerStats,STRIKE,dist} from '../game.js';
-import {HeightField,createTerrain,scatter,PAD_Y,PAD_TOP,LIGHTHOUSE_Y,COTTAGE,PIER,MAX_DECALS,ROAD_Y,mulberry} from './terrain.js';
+import {PADS,SOURCE,TYPES,PATH,PATH_LENGTH,pathPosition,towerStats,STRIKE,BEAM,DARK,dist,isNightWave} from '../game.js';
+import {HeightField,createTerrain,scatter,PAD_Y,PAD_TOP,LIGHTHOUSE_Y,COTTAGE,PIER,MAX_DECALS,MAX_LAMPS,ROAD_Y,mulberry} from './terrain.js';
 import {createWater} from './water.js';
 import {Atmosphere,moodFor} from './sky.js';
 import {createMaterials,buildLighthouse,buildPads,buildTower,CREATURES,clawGeometry,treeGeometries,rockGeometry,grassGeometry,buildCottage,buildPier,buildBoat,buildBuoy,birdGeometry,merge,part} from './models.js';
@@ -17,7 +17,7 @@ export const QUALITY={
 const rgb=(c,k=1)=>{const x=new THREE.Color(c);return [x.r*k,x.g*k,x.b*k];};
 const FIRE=[rgb('#ffd27a',3.2),rgb('#ff7a2a',1.4)],SMOKE=[rgb('#6d6a66'),rgb('#3a3a3a')],DUST=[rgb('#b09a78'),rgb('#8a7a64')];
 const easeBack=t=>{const c=1.9;return 1+(c+1)*(t-1)**3+c*(t-1)**2;};
-const _v=new THREE.Vector3(),_v2=new THREE.Vector3(),_v3=new THREE.Vector3(),_m=new THREE.Matrix4(),_m2=new THREE.Matrix4(),_q=new THREE.Quaternion(),_q2=new THREE.Quaternion(),_s=new THREE.Vector3(),_c=new THREE.Color(),_up=new THREE.Vector3(0,1,0),_ray=new THREE.Raycaster(),_ndc=new THREE.Vector2();
+const _v=new THREE.Vector3(),_v2=new THREE.Vector3(),_v3=new THREE.Vector3(),_m=new THREE.Matrix4(),_m2=new THREE.Matrix4(),_q=new THREE.Quaternion(),_q2=new THREE.Quaternion(),_s=new THREE.Vector3(),_c=new THREE.Color(),_c2=new THREE.Color(),_up=new THREE.Vector3(0,1,0),_ray=new THREE.Raycaster(),_ndc=new THREE.Vector2();
 
 function warningTexture(color) {
   const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');
@@ -32,9 +32,9 @@ function haloTexture() {
 }
 
 export class World3D {
-  constructor(canvas,game,{quality='high',view=null}={}) {
+  constructor(canvas,game,{quality='high',view=null,insets=null}={}) {
     this.kind='3d';this.canvas=canvas;this.game=game;this.quality=quality;const q=this.q=QUALITY[quality];
-    this.hover=null;this.selected=null;this.buildType=null;this.grid=true;this.aim=null;this.time=0;this.clock=0;this.onSound=null;
+    this.hover=null;this.selected=null;this.buildType=null;this.grid=true;this.aim=null;this.highlight=null;this.time=0;this.clock=0;this.onSound=null;
     const r=this.renderer=new THREE.WebGLRenderer({canvas,antialias:!q.bloom,powerPreference:'high-performance'});
     r.outputColorSpace=THREE.SRGBColorSpace;r.toneMapping=THREE.NeutralToneMapping;r.shadowMap.enabled=q.shadow>0;r.shadowMap.type=THREE.PCFShadowMap;
     this.scene=new THREE.Scene();this.camera=new THREE.PerspectiveCamera(34,1,.1,1400);
@@ -51,7 +51,7 @@ export class World3D {
     this.scene.add(this.additive.mesh,this.smoke.mesh,this.debris.mesh,this.ribbons.mesh,this.rings.group,this.labels.group,this.rain.mesh);
     this.flashes=Array.from({length:q.flashes},()=>{const l=new THREE.PointLight('#ffffff',0,5,2);this.scene.add(l);return {light:l,t:0,life:1,peak:0};});
     this.decals=[];this.decalIndex=0;this.later=[];
-    this.buildLighthouse();this.buildPads();this.buildCreatures();this.buildScenery();
+    this.buildLighthouse();this.buildPads();this.buildCreatures();this.buildScenery();this.buildPreview();
     this.towers=new Map();this.dying=[];this.enemyViews=new Map();this.shellViews=new WeakMap();this.cables=new Map();this.networkKey='';this.ghosts={};
     this.warnings={disconnected:new THREE.SpriteMaterial({map:warningTexture('#c9674f'),depthWrite:false}),overload:new THREE.SpriteMaterial({map:warningTexture('#c99a4f'),depthWrite:false})};
     this.shells=new THREE.InstancedMesh(new THREE.SphereGeometry(.06,10,8),new THREE.MeshStandardMaterial({color:'#2e2c28',roughness:.5,metalness:.6}),40);
@@ -60,8 +60,11 @@ export class World3D {
     this.pulses.frustumCulled=false;this.pulses.count=0;this.pulses.setColorAt(0,_c.set(1,1,1));this.scene.add(this.pulses);
     const lineGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
     this.link=new THREE.Line(lineGeo,new THREE.LineDashedMaterial({color:'#eef0bc',dashSize:.14,gapSize:.1,transparent:true,opacity:.85,depthTest:false}));this.link.visible=false;this.link.renderOrder=12;this.scene.add(this.link);
-    const fit=[...Array.from({length:40},(_,i)=>{const a=i/40*TAU;return new THREE.Vector3(Math.cos(a)*7.25*.97,0,Math.sin(a)*6.25*.97);}),this.at(SOURCE.x,SOURCE.y,3.7)];
-    this.rig=new CameraRig(this.camera,canvas,fit);
+    // Frame the playfield (pads, road, landing and lighthouse) with a margin rather than the whole island, so phones get a closer view.
+    const field=[...PADS.map(p=>this.at(p.x,p.y,.3)),...PATH.map(([x,y])=>this.at(x,y,.2)),this.at(-.8,4,.1),this.at(SOURCE.x,SOURCE.y,3.7)],mid=new THREE.Vector3();
+    for(const p of field)mid.add(p);mid.divideScalar(field.length);
+    this.rig=new CameraRig(this.camera,canvas,field.map(p=>p.sub(mid).multiplyScalar(1.14).add(mid)));
+    if(insets)this.rig.setInsets(insets);
     // Respect reduced-motion preferences: no fly-in and no camera shake.
     this.rig.calm=matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     // A renderer rebuilt for a new quality level keeps the player's camera instead of replaying the fly-in.
@@ -76,8 +79,9 @@ export class World3D {
   get shake(){return this.rig.trauma;}
   get particles(){return [];}
   set particles(v){this.additive.clear();this.smoke.clear();this.debris.clear();this.ribbons.clear();this.rings.clear();this.labels.clear();}
+  setInsets(insets){this.rig.setInsets(insets);this.resize();}
   setGame(game) {
-    this.game=game;
+    this.game=game;this.rig.reset();this.beamDown=0;
     for(const view of this.towers.values())this.removeTowerView(view);
     this.towers.clear();this.enemyViews.clear();this.particles=[];this.strike=null;this.aim=null;this.decals.length=0;this.later.length=0;this.networkKey='';this.fireworks=0;
     for(const c of this.cables.values()){this.scene.remove(c.mesh);c.mesh.geometry.dispose();}this.cables.clear();
@@ -88,7 +92,7 @@ export class World3D {
     this.w=rect.width;this.h=rect.height;this.dpr=Math.min(window.devicePixelRatio||1,this.q.ratio);
     this.renderer.setPixelRatio(this.dpr);this.renderer.setSize(this.w,this.h,false);
     this.bloom?.setSize(Math.round(this.w*this.dpr),Math.round(this.h*this.dpr));
-    this.rig.resize(this.w/this.h);this.rig.update(0);
+    this.rig.resize(this.w,this.h);this.rig.update(0);
     this.canvas.dispatchEvent(new CustomEvent('mapresize'));
   }
 
@@ -105,7 +109,7 @@ export class World3D {
     this.scene.add(this.beamLight,this.beamLight.target);
     this.haloSprite=new THREE.Sprite(new THREE.SpriteMaterial({map:this.halo,color:'#ffdca0',transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));
     this.haloSprite.position.copy(this.lamp.position);this.haloSprite.renderOrder=10;this.scene.add(this.haloSprite);
-    this.beamYaw=0;this.beamTilt=.07;
+    this.beamYaw=0;this.beamTilt=.07;this.beamDown=0;this.beamReach=12;this.lampLevel=0;
   }
   buildPads() {
     for(const m of buildPads(PADS,this.mats,p=>this.at(p.x,p.y,0,new THREE.Vector3()).setY(PAD_Y)))this.scene.add(m);
@@ -164,6 +168,31 @@ export class World3D {
       rw.scale.z=-1;g.add(body,l,rw);g.scale.setScalar(1.3);this.scene.add(g);
       this.birds.push({g,l,rw,radius:4+i*1.6,height:3+(i%3)*.8,speed:.18+(i%4)*.05,phase:i*1.3,cx:(i%2?-1:1.5),cz:(i%3)-1});
     }
+  }
+
+  // Before each wave, chevrons flow along the road from the landing to the lighthouse, tinted for night and the colossus.
+  buildPreview() {
+    const shape=new THREE.Shape();shape.moveTo(-.1,-.12);shape.lineTo(.08,0);shape.lineTo(-.1,.12);shape.lineTo(-.045,0);shape.closePath();
+    const geo=new THREE.ShapeGeometry(shape);geo.rotateX(-Math.PI/2);
+    this.chevrons=new THREE.InstancedMesh(geo,new THREE.MeshBasicMaterial({color:'#ffffff',transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}),40);
+    this.chevrons.frustumCulled=false;this.chevrons.count=0;this.chevrons.renderOrder=6;this.chevrons.setColorAt(0,_c.set(1,1,1));this.scene.add(this.chevrons);
+    this.previewFade=0;this.landingT=0;
+  }
+  syncPreview(dt) {
+    const g=this.game,show=g.phase==='build'&&(g.endless||g.wave<10);
+    this.previewFade=clamp(this.previewFade+(show?dt*1.5:-dt*3),0,1);
+    if(this.previewFade<=0){this.chevrons.count=0;return;}
+    const next=g.waveDef(g.wave+1),boss=next.units.some(([type])=>type==='boss'),night=isNightWave(g.wave+1);
+    const color=_c2.set(boss?'#ff9274':night?'#a8bdff':'#f6d99a'),n=34,spacing=PATH_LENGTH/n;
+    for(let i=0;i<n;i++){
+      const d=(i*spacing+this.clock*.9)%PATH_LENGTH,a=pathPosition(d),b=pathPosition(Math.min(PATH_LENGTH,d+.05));
+      const fade=Math.min(1,d/1.2,(PATH_LENGTH-d)/1.4)*(.45+.55*Math.max(0,Math.sin(d*.8-this.clock*2.4)))*this.previewFade;
+      _m.compose(_v.set(a.x-6.5,this.field.sample(a.x,a.y)+.04,a.y-5.5),_q.setFromAxisAngle(_up,Math.atan2(-(b.y-a.y),b.x-a.x)),_s.setScalar(1.25));
+      this.chevrons.setMatrixAt(i,_m);this.chevrons.setColorAt(i,_c.copy(color).multiplyScalar(fade*1.5));
+    }
+    this.chevrons.count=n;this.chevrons.instanceMatrix.needsUpdate=true;this.chevrons.instanceColor.needsUpdate=true;
+    // The landing in the surf pulses where the next wave will climb ashore.
+    if(show&&(this.landingT-=dt)<=0){this.landingT=1.3;const p=this.at(-1.1,4);this.rings.add(p.x,.04,p.z,{from:.25,to:1.5,life:1.5,color:'#'+color.getHexString(),intensity:1.1});}
   }
 
   // ————— Picking & projection —————
@@ -295,8 +324,11 @@ export class World3D {
       for(let i=0;i<40;i++){const a=Math.random()*TAU,r=Math.random()*STRIKE.radius;this.additive.spawn({x:p.x+Math.cos(a)*r,y:p.y+.05,z:p.z+Math.sin(a)*r,vy:.8+Math.random()*2.2,life:.8+Math.random()*.9,size:.03,stretch:.02,color:rgb('#ffcf7a',3),gravity:-.4,drag:1,sprite:SPRITE.glow});}
       this.rings.add(p.x,p.y+.04,p.z,{from:.2,to:STRIKE.radius*1.4,life:.7,color:'#ffe2a0',intensity:2.5});
       this.scorch(p.x,p.z,STRIKE.radius*.95,1);this.flash(_v3.copy(p).setY(p.y+1),'#ffd9a0',30,.5,9);this.strike=null;
+    } else if(e.type==='beam') {
+      const p=this.at(e.x,e.y);this.rings.add(p.x,Math.max(p.y,0)+.04,p.z,{from:.3,to:BEAM.radius,life:.55,color:'#ffe6b0',intensity:1.3});
     } else if(e.type==='boss') {
       const p=this.at(-.6,4);this.splash(p,3);this.rig.shake(.6);this.flash(_v3.set(p.x,1,p.z),'#ff5a3a',14,1.2,8);
+      this.rig.play({target:this.at(.8,4,.3),zoom:.5,elevation:.4,azimuth:.35},{hold:3,rate:1.8});
     } else if(e.type==='overdrive') {
       this.flash(this.lamp.position,'#ffe0a0',20,.6,10);this.rings.add(this.lamp.position.x,PAD_TOP,this.lamp.position.z,{from:.5,to:9,life:1.2,color:'#ffe2a0',intensity:1.4});
     } else if(e.type==='grid') {
@@ -305,12 +337,18 @@ export class World3D {
       this.beamPulse=1;
     } else if(e.type==='won') {
       this.fireworks=4;
+      // Dawn: a low shot past the lighthouse towards the rising sun.
+      this.rig.play({target:this.at(SOURCE.x,SOURCE.y,1.4),zoom:.62,elevation:.2,azimuth:1.15},{stay:true,rate:.8});
+    } else if(e.type==='lost') {
+      this.rig.play({elevation:1.02,zoom:1.3},{stay:true,rate:.5});
     }
   }
 
   // ————— Per-frame sync —————
   syncTowers(dt) {
-    const g=this.game,alive=new Set(),od=g.overdrive>0;
+    const g=this.game,alive=new Set(),od=g.overdrive>0,lamps=this.terrain.uniforms.uLamps.value;let lamp=0;
+    for(const t of g.towers)if(t.type==='relay'&&t.powered&&lamp<MAX_LAMPS){const c=this.at(t.x,t.y);lamps[lamp++].set(c.x,c.z,DARK.lamp,this.lampLevel*.85);}
+    while(lamp<MAX_LAMPS)lamps[lamp++].set(0,0,1,0);
     for(const t of g.towers){
       alive.add(t.id);let view=this.towers.get(t.id);
       if(view&&view.level!==t.level){this.removeTowerView(view,false);view=null;}
@@ -325,7 +363,7 @@ export class World3D {
       if(m.spin){view.spinBoost=Math.max(0,(view.spinBoost||0)-dt*1.5);m.spin.rotation.x+=dt*(2+view.spinBoost*22);}
       if(m.crystal){m.crystal.rotation.y+=dt*(t.powered?1.2:.2);m.crystal.position.y=.76+Math.sin(this.time*2+t.id)*.03+(view.kick||0)*.04;m.orbit.rotation.y-=dt*(t.powered?1.8:.3);}
       const pulse=od?1.7+Math.sin(this.clock*14)*.5:1;
-      if(t.type==='relay'){const blink=Math.sin(this.clock*4+t.id)>0?1:.25;m.glow.emissive.set(t.connected?'#9df27a':'#ff5a4a');m.glow.emissiveIntensity=(t.connected?2.2:3)*blink;}
+      if(t.type==='relay'){const blink=Math.sin(this.clock*4+t.id)>0?1:.25;m.glow.emissive.set(t.connected?'#9df27a':'#ff5a4a');m.glow.emissiveIntensity=(t.connected?2.2:3)*blink;if(m.lampMat)m.lampMat.emissiveIntensity=t.powered?this.lampLevel*6:0;}
       else{m.glow.emissiveIntensity=t.powered?2.3*pulse:.04;if(m.crystalMat?.emissive)m.crystalMat.emissiveIntensity=t.powered?.55*pulse+(view.kick||0)*.8:.06;}
       if(od&&t.powered&&t.type!=='relay'&&Math.random()<dt*6){const p=m.root.getWorldPosition(_v);this.additive.spawn({x:p.x+(Math.random()-.5)*.5,y:p.y+.2,z:p.z+(Math.random()-.5)*.5,vy:.9,life:.8,size:.04,color:rgb('#ffe2a0',3),sprite:SPRITE.glow});}
       const warn=!t.powered&&view.age>.4;view.warn.visible=warn;
@@ -380,7 +418,7 @@ export class World3D {
     return local.map(a=>a.multiplyScalar(TOWER_SCALE).add(view.model.root.position)).sort((a,b)=>a.distanceTo(o)-b.distanceTo(o))[0];
   }
   syncCreatures(dt) {
-    const g=this.game,alive=new Set(),counts={},cam=this.camera;
+    const g=this.game,alive=new Set(),counts={},cam=this.camera,night=g.isNight();
     for(const type of Object.keys(this.kinds))counts[type]=0;
     let legN=0,eyeN=0,clawN=0,barN=0;const tint=new THREE.Color(),legColor=new THREE.Color(),eyeGlow=new THREE.Color(),knee=new THREE.Vector3(),perp=new THREE.Vector3(),size=new THREE.Vector3(),euler=new THREE.Euler(),jaw=new THREE.Matrix4();
     const room=(mesh,n,extra=1)=>n+extra<=mesh.instanceMatrix.count;
@@ -397,11 +435,12 @@ export class World3D {
       const rise=e.type!=='spawn'&&e.distance<.55?(1-e.distance/.55)**2*(.3+def.bodyY*def.scale):0;
       const gy=this.field.sample(e.x,e.y),stun=e.stun>0,wobble=stun?Math.sin(this.time*18+e.id)*.12:0;
       const root=_m2.compose(_v.set(e.x-6.5,gy-rise,e.y-5.5),_q.setFromAxisAngle(_up,v.yaw+wobble),_s.setScalar(def.scale));
-      const hit=e.hit>0?1+e.hit*18:1,frost=e.slow>0;tint.setRGB(hit*(frost?.72:stun?1.25:1),hit*(frost?.92:stun?1.2:1),hit*(frost?1.35:stun?.8:1));
+      const hit=e.hit>0?1+e.hit*18:1,frost=e.slow>0,hidden=night&&!e.seen,shade=hidden?.26:e.lit?1.18:1;
+      tint.setRGB(hit*(frost?.72:stun?1.25:1),hit*(frost?.92:stun?1.2:1),hit*(frost?1.35:stun?.8:1)).multiplyScalar(shade);
       const bob=Math.abs(Math.sin(v.gait))*def.legs.lift*.35;
       _m.makeTranslation(0,bob,0);_m.premultiply(root);k.body.setMatrixAt(counts[e.type],_m);k.body.setColorAt(counts[e.type]++,tint);
       // Legs: two-bone IK from hip to a stepping foot.
-      const L=def.legs,hips=L.hips;legColor.set(def.leg).multiplyScalar(hit);
+      const L=def.legs,hips=L.hips;legColor.set(def.leg).multiplyScalar(hit*shade);
       for(let i=0;i<hips.length;i++)for(const side of [1,-1]){
         if(!room(this.legs,legN,2))break;
         const [hx,hz]=hips[i],phase=v.gait+(i%2?Math.PI:0)+(side>0?0:Math.PI)+(hips.length>3?i*.9:0);
@@ -431,7 +470,7 @@ export class World3D {
       if(stun&&Math.random()<dt*10){_v.set(0,def.hpY*.8,0).applyMatrix4(root);this.additive.spawn({x:_v.x+(Math.random()-.5)*.3,y:_v.y,z:_v.z+(Math.random()-.5)*.3,vy:.3,life:.4,size:.06,color:rgb('#fff0a0',3),sprite:SPRITE.star,spin:5});}
       if(frost&&Math.random()<dt*6){_v.set(0,def.bodyY,0).applyMatrix4(root);this.smoke.spawn({x:_v.x,y:_v.y,z:_v.z,vy:-.05,life:.9,size:.12,grow:.2,color:rgb('#e6fbff'),alpha:.3,sprite:SPRITE.smoke});}
       // Health bar, billboarded towards the camera.
-      if((e.hp<e.maxHp||e.type==='boss')&&room(this.hpBack,barN)){
+      if((e.hp<e.maxHp||e.type==='boss')&&!hidden&&room(this.hpBack,barN)){
         const w=def.hpW*def.scale,frac=clamp(e.hp/e.maxHp,0,1);_v.set(0,def.hpY,0).applyMatrix4(root);
         _m.compose(_v,cam.quaternion,_s.set(w+.04,e.type==='boss'?.085:.055,1));this.hpBack.setMatrixAt(barN,_m);this.hpBack.setColorAt(barN,_c.set('#1d3533'));
         _v2.set(1,0,0).applyQuaternion(cam.quaternion).multiplyScalar(-(1-frac)*w/2);
@@ -460,15 +499,18 @@ export class World3D {
     const g=this.game,build=this.buildType,pulse=.5+.5*Math.sin(this.clock*4);
     PADS.forEach((pad,i)=>{
       const m=this.padMarkers[i],occupied=g.towers.some(t=>t.pad===pad.id),active=this.hover===pad.id||this.selected===pad.id;
-      let o=0;if(active)o=this.selected===pad.id?.95:.7;else if(!occupied)o=build&&g.canEdit()?.25+.25*pulse:.1;
-      m.material.opacity=o;m.visible=o>0;m.material.color.set(active?'#f5d795':build&&!occupied?'#d9e6b0':'#c9d4b4');
+      const guide=this.highlight===pad.id&&!occupied;
+      let o=0;if(active)o=this.selected===pad.id?.95:.7;else if(guide)o=.45+.55*pulse;else if(!occupied)o=build&&g.canEdit()?.25+.25*pulse:.1;
+      m.material.opacity=o;m.visible=o>0;m.material.color.set(active||guide?'#f5d795':build&&!occupied?'#d9e6b0':'#c9d4b4');
+      m.scale.setScalar(guide?1+.12*pulse:1);
     });
     const target=PADS[this.hover??this.selected],chosen=target&&g.towers.find(t=>t.pad===target.id),u=this.terrain.uniforms;
-    u.uRange.value.set(0,0,0,0);this.link.visible=false;
+    u.uRange.value.set(0,0,0,0);u.uSight.value.set(0,0,0,0);this.link.visible=false;
     for(const [type,ghost] of Object.entries(this.ghosts))ghost.root.visible=false;
     if(target&&(chosen||build)){
       const type=chosen?chosen.type:build,stats=chosen?towerStats(chosen):TYPES[type],radius=type==='relay'?4.8:stats.range,c=this.at(target.x,target.y);
       u.uRange.value.set(c.x,c.z,radius,1);u.uRangeColor.value.set(TYPES[type].color);
+      if(type!=='relay'&&(g.isNight()||g.phase==='build'&&isNightWave(g.wave+1)))u.uSight.value.set(c.x,c.z,radius*DARK.sight,1);
       if(build&&!chosen){
         let ghost=this.ghosts[build];
         if(!ghost){ghost=this.ghosts[build]=buildTower(build,1,this.mats,{ghost:true});this.scene.add(ghost.root);}
@@ -487,22 +529,34 @@ export class World3D {
     const health=g.hp/100,flicker=health<.6?1-(.35*(1-health))*(Math.sin(this.clock*23)*Math.sin(this.clock*7.3)>.55?1:0):1;
     const dying=lost?Math.max(0,1-this.lostT/1.6)*(Math.sin(this.lostT*40)>0?1:.3):1;
     const od=g.overdrive>0?1.5:1,power=clamp(s.beam,0,3)*flicker*dying*(1-this.hurt*.6)*od*(1+this.beamPulse*.6);
-    // The lamp sweeps the island; during a strike it swings onto the target and dips its beam.
-    let goalTilt=.07;
-    if(this.strike){
-      this.strike.t+=dt;const c=this.at(this.strike.x,this.strike.y),dx=c.x-this.lamp.position.x,dz=c.z-this.lamp.position.z,goal=Math.atan2(-dz,dx);
-      let d=goal-this.beamYaw;d=Math.atan2(Math.sin(d),Math.cos(d));this.beamYaw+=d*(1-Math.exp(-dt*14));
-      goalTilt=Math.atan2(this.lamp.position.y-c.y,Math.hypot(dx,dz));
-      if(Math.random()<.9){const a=Math.random()*TAU,r=STRIKE.radius*(1-this.strike.t/STRIKE.delay*.6);this.additive.spawn({x:c.x+Math.cos(a)*r,y:c.y+.08,z:c.z+Math.sin(a)*r,vx:-Math.cos(a)*r*1.2,vz:-Math.sin(a)*r*1.2,vy:.2,life:.4,size:.05,color:rgb('#ffe2a0',3),sprite:SPRITE.glow});}
+    // The lamp sweeps the horizon until the keeper lowers it; then it swings round and pins a pool of light to the island.
+    const spot=g.beam.spot,lamp=this.lamp.position;let goalTilt=.07;
+    if(spot){
+      const c=this.at(spot.x,spot.y,0,_v2),dx=c.x-lamp.x,dz=c.z-lamp.z,flat=Math.hypot(dx,dz);
+      let d=Math.atan2(-dz,dx)-this.beamYaw;d=Math.atan2(Math.sin(d),Math.cos(d));this.beamYaw+=d*(1-Math.exp(-dt*(this.strike?14:8)));
+      goalTilt=Math.atan2(lamp.y-c.y,flat);this.beamReach=Math.hypot(flat,lamp.y-c.y);
     } else this.beamYaw-=dt*(.3+(g.overdrive>0?.5:0));
-    this.beamTilt+=(goalTilt-this.beamTilt)*(1-Math.exp(-dt*10));
+    if(this.strike){
+      this.strike.t+=dt;const c=this.at(this.strike.x,this.strike.y);
+      if(Math.random()<.9){const a=Math.random()*TAU,r=STRIKE.radius*(1-this.strike.t/STRIKE.delay*.6);this.additive.spawn({x:c.x+Math.cos(a)*r,y:c.y+.08,z:c.z+Math.sin(a)*r,vx:-Math.cos(a)*r*1.2,vz:-Math.sin(a)*r*1.2,vy:.2,life:.4,size:.05,color:rgb('#ffe2a0',3),sprite:SPRITE.glow});}
+    }
+    this.beamDown+=((spot?g.beam.charge:0)-this.beamDown)*(1-Math.exp(-dt*7));
+    this.beamTilt+=(goalTilt-this.beamTilt)*(1-Math.exp(-dt*(spot?9:3)));
     lh.lens.rotation.set(0,this.beamYaw,0);lh.beams[0].rotation.z=-this.beamTilt;lh.beams[1].rotation.z=-.07;
-    const strikeBoost=this.strike?2.2:1;
-    lh.beams.forEach((b,i)=>{b.material.uniforms.uIntensity.value=power*b.userData.strength*(i===0?strikeBoost:1)*.085;b.material.uniforms.uTime.value=this.clock;b.visible=power>.02;});
+    // Lowered, the main beam shortens to end just past the pool of light and widens to match the lit radius.
+    const k=this.beamDown,length=this.beamReach*1.08/15,wide=BEAM.radius*1.02/1.35;
+    lh.beams[0].scale.set(1+(length-1)*k,1+(wide-1)*k,1+(wide-1)*k);
+    const strikeBoost=this.strike?2.2:1+k*.7;
+    lh.beams.forEach((b,i)=>{b.material.uniforms.uIntensity.value=power*b.userData.strength*(i===0?strikeBoost:1-k)*.085;b.material.uniforms.uTime.value=this.clock;b.visible=power>.02&&(i===0||k<.9);});
     lh.lampMat.emissiveIntensity=2+power*3.2;lh.lensMat.emissiveIntensity=.6+power*1.4;lh.windowMat.emissiveIntensity=(s.lamps*1.6)*dying;
     this.lamp.intensity=(2+power*6)*(lost?dying:1);
     _v.set(Math.cos(this.beamYaw)*Math.cos(this.beamTilt),-Math.sin(this.beamTilt),-Math.sin(this.beamYaw)*Math.cos(this.beamTilt));
-    this.beamLight.target.position.copy(this.beamLight.position).addScaledVector(_v,12);this.beamLight.intensity=power*(this.strike?260:90);
+    this.beamLight.target.position.copy(this.beamLight.position).addScaledVector(_v,12+(this.beamReach-12)*k);
+    this.beamLight.angle=.13+(Math.atan(BEAM.radius*1.1/this.beamReach)-.13)*k;this.beamLight.penumbra=.6-.2*k;
+    this.beamLight.intensity=power*(this.strike?260:90+110*k);
+    // The pool of light is drawn into the ground as well, so it reads in every quality level and in daylight.
+    const night=clamp((2.3-s.keyI)/1.2,0,1),pool=spot?this.at(spot.x,spot.y,0,_v2):null;
+    this.terrain.uniforms.uBeam.value.set(pool?.x??0,pool?.z??0,pool?BEAM.radius:0,k*(.22+night*.7)*Math.min(1,power));
     this.haloSprite.material.opacity=clamp(.25+power*.3,0,1);this.haloSprite.scale.setScalar(1.1+power*.5);
     if(g.hp<55&&!lost&&Math.random()<dt*(g.hp<30?9:4)){const p=this.lamp.position;this.smoke.spawn({x:p.x+(Math.random()-.5)*.4,y:p.y-.4,z:p.z+(Math.random()-.5)*.4,vx:.25,vy:.45,life:2.4,size:.16,grow:.5,color:rgb('#4a4744'),alpha:.5,sprite:SPRITE.smoke,drag:.4});}
     if(g.hp<30&&!lost&&Math.random()<dt*6){const p=this.at(SOURCE.x-.5,SOURCE.y+.2,.6);this.additive.spawn({x:p.x,y:p.y,z:p.z,vx:(Math.random()-.5)*.3,vy:.7,life:.5,size:.12,color:FIRE[0],to:FIRE[1],sprite:SPRITE.glow});}
@@ -550,7 +604,8 @@ export class World3D {
     const tu=this.terrain.uniforms;tu.uTime.value=this.clock;tu.uWet.value=s.wet;tu.uSun.value=clamp(s.keyI/2.5,0,1);tu.uCloud.value=s.clouds*clamp((s.keyI-.9)/1.6,0,1);
     this.mats.wind.uTime.value=this.clock;this.mats.wind.uWind.value=.35+s.wind*1.4;
     const ru=this.rain.uniforms;ru.uTime.value=this.clock;ru.uIntensity.value=s.rain;ru.uCenter.value.copy(this.rig.target);ru.uWind.value.set(1.2+s.wind*2.5,.5+s.wind);this.rain.mesh.visible=s.rain>.02;
-    this.syncTowers(dt);this.syncCables(dt);this.syncCreatures(dt);this.syncShells(dt);this.syncMarkers();this.syncLighthouse(dt,s);this.ambient(dt,s);this.updateDecals(dt);
+    this.lampLevel=clamp(s.lamps,0,1)*clamp((2.4-s.keyI)/1.1,0,1);
+    this.syncTowers(dt);this.syncCables(dt);this.syncCreatures(dt);this.syncShells(dt);this.syncMarkers();this.syncLighthouse(dt,s);this.syncPreview(dt);this.ambient(dt,s);this.updateDecals(dt);
     for(const f of this.flashes){f.t+=dt;f.light.intensity=f.t<f.life?f.peak*(1-f.t/f.life)**2:0;}
     const fx=dt||0,ground=(x,z)=>this.field.sample(x+6.5,z+5.5);
     this.additive.update(fx,ground);this.smoke.update(fx,ground);this.debris.update(fx,ground);this.ribbons.update(fx,this.camera);this.rings.update(fx);this.labels.update(fx);

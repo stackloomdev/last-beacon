@@ -17,25 +17,27 @@ export const ENEMIES = {
   tank: {name:'重甲蟹', hp:155,speed:.52,reward:20,leak:18,color:'#a693b3'},
   splitter: {name:'裂殖体', hp:68,speed:.62,reward:10,leak:12,split:2,color:'#8fae78'},
   spawn: {name:'裂殖幼体', hp:15,speed:1.05,reward:2,leak:3,color:'#c3cf8e'},
-  boss: {name:'深渊巨像', hp:2300,speed:.34,reward:100,leak:100,color:'#e09173'}
+  boss: {name:'深渊巨像', hp:2300,speed:.34,reward:100,leak:100,glow:true,color:'#e09173'}
 };
+// Each wave arrives under its own sky; the renderer lights the island to match and night skies change the rules.
 export const WAVES = [
-  {name:'潮水初动', units:[['crawler',8]], interval:1.45},
-  {name:'岸边的足迹', units:[['crawler',11],['runner',3]], interval:1.35},
-  {name:'疾风过境', units:[['runner',12],['crawler',6]], interval:1.15},
-  {name:'铁甲来客', units:[['crawler',12],['tank',3]], interval:1.2},
-  {name:'涨潮时分', units:[['crawler',18],['runner',7],['splitter',3]], interval:.85},
-  {name:'破浪重装', units:[['tank',7],['runner',12]], interval:1.2},
-  {name:'漫长的夜', units:[['crawler',16],['tank',6],['splitter',4]], interval:.9},
-  {name:'风暴前线', units:[['runner',24],['tank',6]], interval:.8},
-  {name:'最后的防线', units:[['tank',12],['crawler',16],['splitter',4]], interval:.85},
-  {name:'深渊巨像', units:[['crawler',14],['tank',8],['boss',1],['runner',12]], interval:.95}
+  {name:'潮水初动', sky:'dusk', units:[['crawler',8]], interval:1.45},
+  {name:'岸边的足迹', sky:'sunset', units:[['crawler',11],['runner',3]], interval:1.35},
+  {name:'疾风过境', sky:'gloaming', units:[['runner',12],['crawler',6]], interval:1.15},
+  {name:'铁甲来客', sky:'blue', units:[['crawler',12],['tank',3]], interval:1.2},
+  {name:'涨潮时分', sky:'night', units:[['crawler',18],['runner',7],['splitter',3]], interval:.85},
+  {name:'破浪重装', sky:'night', units:[['tank',7],['runner',12]], interval:1.2},
+  {name:'漫长的夜', sky:'deep', units:[['crawler',16],['tank',6],['splitter',4]], interval:.9},
+  {name:'风暴前线', sky:'storm', units:[['runner',24],['tank',6]], interval:.8},
+  {name:'最后的防线', sky:'drizzle', units:[['tank',12],['crawler',16],['splitter',4]], interval:.85},
+  {name:'深渊巨像', sky:'abyss', units:[['crawler',14],['tank',8],['boss',1],['runner',12]], interval:.95}
 ];
+export const NIGHT_SKIES = ['night','deep','abyss'];
 // Normal keeps the original curve. Other difficulties scale enemy toughness, supplies and leak damage.
 export const DIFFICULTIES = {
   easy: {credits:220, hp:.7, leak:.75},
   normal: {credits:180, hp:1, leak:1},
-  hard: {credits:160, hp:1.3, leak:1.25}
+  hard: {credits:160, hp:1.45, leak:1.25}
 };
 export const TARGETING = ['first','strong','close'];
 export const OVERDRIVE = {duration:6, cooldown:35, rate:1.8};
@@ -43,7 +45,13 @@ export const OVERDRIVE = {duration:6, cooldown:35, rate:1.8};
 export const STRIKE = {cooldown:45, delay:.8, radius:1.35, damage:110, stun:1.2, bossStun:.45};
 // Strikes must land on the map. Targets beyond it are rejected rather than moved, so the blast always lands on the marker.
 export const canStrikeAt=(x,y)=>Number.isFinite(x)&&Number.isFinite(y)&&x>=-.5&&x<=13.5&&y>=-.5&&y<=11.5;
-export const ENDLESS = {growth:1.06, gridLevels:10};
+// The keeper can lower the lamp onto the island. The pool of light glides to each new target and stays for a while during a wave.
+// Towers hit lit enemies harder, and lit enemies slow down in the glare.
+export const BEAM = {radius:1.6, hold:12, speed:12, lower:.35, bonus:1.25, slow:.15};
+// Under a night sky towers only make out distant enemies that stand in light: the beam, the lighthouse glow or a powered relay lamp.
+// The colossus carries its own light: its molten core keeps it visible.
+export const DARK = {sight:.7, glow:2.6, lamp:1.5};
+export const ENDLESS = {growth:1.06, gridLevels:10, skies:['night','storm','abyss','deep','drizzle']};
 const segments = PATH.slice(1).map((p,i)=>({a:PATH[i],b:p,len:Math.hypot(p[0]-PATH[i][0],p[1]-PATH[i][1])}));
 export const PATH_LENGTH = segments.reduce((s,p)=>s+p.len,0);
 export function pathPosition(distance) {
@@ -67,8 +75,9 @@ export function waveDefinition(n) {
   if(n>=1&&n<=WAVES.length)return WAVES[n-1];
   const k=Math.max(1,n-WAVES.length),units=[['crawler',14+2*k],['runner',10+k],['splitter',3+k],['tank',6+Math.ceil(k/2)]];
   if(n%5===0)units.push(['boss',1+Math.floor(k/10)]);
-  return {name:'endless',units,interval:Math.max(.5,.85-.015*k),endless:true};
+  return {name:'endless',sky:ENDLESS.skies[(k-1)%ENDLESS.skies.length],units,interval:Math.max(.5,.85-.015*k),endless:true};
 }
+export const isNightWave=n=>NIGHT_SKIES.includes(waveDefinition(n).sky);
 
 export class Game {
   constructor({starter=true,difficulty='normal'}={}) {
@@ -78,6 +87,7 @@ export class Game {
     this.towers=[]; this.enemies=[]; this.projectiles=[]; this.effects=[];this.events=[];this.strikes=[];
     this.time=0;this.kills=0;this.nextId=1;this.queue=[];this.spawnTimer=0;
     this.network=[];this.powerUsed=0;this.elapsed=0;this.lastReward=0;this.overdrive=0;this.overdriveCooldown=0;this.strikeCooldown=0;
+    this.beam={spot:null,aim:null,hold:0,charge:0};
     if(starter) this.towers.push({pad:0,x:PADS[0].x,y:PADS[0].y,id:this.nextId++,type:'gun',level:1,invested:0,cooldown:0,angle:0,target:'first'});
     this.recomputePower();
   }
@@ -93,6 +103,7 @@ export class Game {
   hpScale(type) {return (type==='boss'?this.pressure()*this.endlessGrowth():this.waveScale())*DIFFICULTIES[this.difficulty].hp;}
   maxGridLevel() {return this.endless?ENDLESS.gridLevels:4;}
   strikeDamage() {return STRIKE.damage*this.waveScale();}
+  isNight() {return this.phase==='wave'&&NIGHT_SKIES.includes(this.waveDef().sky);}
   recomputePower() {
     this.network=[];this.powerUsed=0;
     for(const t of this.towers) {t.connected=false;t.powered=false;}
@@ -153,7 +164,41 @@ export class Game {
   }
   activateStrike(x,y) {
     if(this.phase!=='wave'||this.paused||this.strikeCooldown>0||!canStrikeAt(x,y))return false;
-    this.strikes.push({x,y,delay:STRIKE.delay});this.strikeCooldown=STRIKE.cooldown;this.emit('strike',{x,y});return true;
+    this.strikes.push({x,y,delay:STRIKE.delay});this.strikeCooldown=STRIKE.cooldown;this.emit('strike',{x,y});
+    // The strike is the lamp at full power: the beam snaps onto the target and keeps lighting it afterwards.
+    Object.assign(this.beam,{spot:{x,y},aim:{x,y},hold:BEAM.hold,charge:1});this.emit('beam',{x,y});
+    return true;
+  }
+  aimBeam(x,y) {
+    if(!this.canEdit()||!canStrikeAt(x,y))return false;
+    const b=this.beam;
+    // A raised beam first has to come down; a lowered one glides across the island.
+    if(!b.spot){b.spot={x,y};b.charge=0;}
+    b.aim={x,y};b.hold=BEAM.hold;this.emit('beam',{x,y});return true;
+  }
+  liftBeam() {
+    if(!this.beam.spot)return false;
+    Object.assign(this.beam,{spot:null,aim:null,hold:0,charge:0});this.emit('beamLift');return true;
+  }
+  isLit(e) {
+    const s=this.beam.spot;
+    return !!s&&this.beam.charge>=1&&Math.hypot(e.x-s.x,e.y-s.y)<=BEAM.radius;
+  }
+  // Refreshes which enemies stand in the beam and which ones distant towers can make out.
+  illuminate() {
+    const night=this.isNight(),lamps=night?this.towers.filter(t=>t.type==='relay'&&t.powered):[];
+    for(const e of this.enemies){
+      e.lit=this.isLit(e);
+      e.seen=!night||e.lit||!!e.glow||dist(e,SOURCE)<=DARK.glow||lamps.some(l=>dist(e,l)<=DARK.lamp);
+    }
+  }
+  updateBeam(dt) {
+    const b=this.beam;if(!b.spot)return;
+    b.charge=Math.min(1,b.charge+dt/BEAM.lower);
+    const dx=b.aim.x-b.spot.x,dy=b.aim.y-b.spot.y,d=Math.hypot(dx,dy),step=BEAM.speed*dt;
+    if(d<=step){b.spot.x=b.aim.x;b.spot.y=b.aim.y;}else{b.spot.x+=dx/d*step;b.spot.y+=dy/d*step;}
+    // The hold only runs down while enemies are on the island, so a beam placed between waves waits for the next one.
+    if(this.phase==='wave'&&(b.hold-=dt)<=0)this.liftBeam();
   }
   continueEndless() {
     if(this.phase!=='won'||this.endless)return false;
@@ -172,8 +217,8 @@ export class Game {
   }
   spawn(type,distance=0) {
     const def=ENEMIES[type],scale=this.hpScale(type);
-    const e={...def,type,id:this.nextId++,maxHp:def.hp*scale,hp:def.hp*scale,distance,slow:0,hit:0,stun:0,...pathPosition(distance)};
-    this.enemies.push(e);
+    const e={...def,type,id:this.nextId++,maxHp:def.hp*scale,hp:def.hp*scale,distance,slow:0,hit:0,stun:0,lit:false,seen:true,...pathPosition(distance)};
+    this.enemies.push(e);this.illuminate();
     if(type==='boss')this.emit('boss');
     return e;
   }
@@ -189,11 +234,13 @@ export class Game {
     }
     return true;
   }
+  // Tower damage is stronger against enemies caught in the beam.
+  towerHit(e,damage,slow=0) {return this.damageEnemy(e,e.lit?damage*BEAM.bonus:damage,slow);}
   pickTarget(t,range) {
-    let best=null,score=-Infinity;
+    let best=null,score=-Infinity;const night=this.isNight(),sight=range*DARK.sight;
     for(const e of this.enemies) {
       if(e.hp<=0)continue;
-      const d=dist(t,e);if(d>range)continue;
+      const d=dist(t,e);if(d>range||(night&&!e.seen&&d>sight))continue;
       const s=t.target==='strong'?e.hp:t.target==='close'?-d:e.distance;
       if(s>score||(s===score&&e.distance>best.distance)){best=e;score=s;}
     }
@@ -216,6 +263,7 @@ export class Game {
     const dt=Math.min(rawDt,.05)*this.speed;this.time+=dt;
     this.overdrive=Math.max(0,this.overdrive-dt);this.overdriveCooldown=Math.max(0,this.overdriveCooldown-dt);this.strikeCooldown=Math.max(0,this.strikeCooldown-dt);
     this.effects=this.effects.filter(e=>(e.life-=dt)>0);
+    this.updateBeam(dt);
     if(this.phase!=='wave')return;
     this.elapsed+=dt;
     this.spawnTimer-=dt;
@@ -225,7 +273,7 @@ export class Game {
       if(e.hp<=0)continue;
       e.slow=Math.max(0,e.slow-dt);e.hit=Math.max(0,e.hit-dt);
       if(e.stun>0){e.stun=Math.max(0,e.stun-dt);continue;}
-      e.distance+=e.speed*(e.slow>0?.48:1)*dt;
+      e.distance+=e.speed*(e.slow>0?.48:1)*(e.lit?1-BEAM.slow:1)*dt;
       Object.assign(e,pathPosition(e.distance));
       if(e.distance>=PATH_LENGTH) {
         const amount=Math.round(e.leak*leakScale);
@@ -233,6 +281,7 @@ export class Game {
       }
     }
     if(this.hp<=0) {this.phase='lost';this.emit('lost');return;}
+    this.illuminate();
     for(const s of this.strikes) {
       if((s.delay-=dt)>0)continue;
       const damage=this.strikeDamage(),hits=this.enemies.filter(e=>e.hp>0&&Math.hypot(e.x-s.x,e.y-s.y)<=STRIKE.radius);
@@ -260,18 +309,18 @@ export class Game {
       if(p.age<p.duration)continue;
       if(p.kind==='mortar') {
         const hits=this.enemies.filter(e=>e.hp>0&&Math.hypot(e.x-p.toX,e.y-p.toY)<=p.splash);
-        for(const e of hits)this.damageEnemy(e,p.damage);
+        for(const e of hits)this.towerHit(e,p.damage);
         this.effects.push({kind:'blast',x:p.toX,y:p.toY,life:.45,total:.45});this.emit('blast',{x:p.toX,y:p.toY,hits:hits.length});
       } else if(p.kind==='arc') {
         let damage=p.damage;
         for(const id of p.chain) {
           const e=this.enemies.find(e=>e.id===id&&e.hp>0);
-          if(e){this.emit('hit',{kind:'arc',x:e.x,y:e.y,id:e.id});this.damageEnemy(e,damage);}
+          if(e){this.emit('hit',{kind:'arc',x:e.x,y:e.y,id:e.id});this.towerHit(e,damage);}
           damage*=p.falloff;
         }
       } else {
         const e=this.enemies.find(e=>e.id===p.target&&e.hp>0);
-        if(e){this.emit('hit',{kind:p.kind,x:e.x,y:e.y,id:e.id});this.damageEnemy(e,p.damage,p.slow);}
+        if(e){this.emit('hit',{kind:p.kind,x:e.x,y:e.y,id:e.id});this.towerHit(e,p.damage,p.slow);}
       }
     }
     this.projectiles=this.projectiles.filter(p=>p.age<p.duration);

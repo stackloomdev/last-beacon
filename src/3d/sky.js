@@ -1,4 +1,5 @@
 import * as THREE from '../../vendor/three.module.min.js';
+import {waveDefinition} from '../game.js';
 
 // Each wave has its own light: dusk settles into night, a storm front rolls in, the colossus brings a red dark, victory brings dawn.
 const MOODS={
@@ -25,13 +26,11 @@ const MOODS={
   lost:{top:'#06080c',horizon:'#1b1e24',bottom:'#0a0c10',sun:[200,-20],sunColor:'#ff7a4a',sunGlow:0,moon:[60,25],moonGlow:.2,stars:.3,clouds:.85,cloudColor:'#2a2d33',cloudShadow:'#0e1014',
     key:[60,50],keyColor:'#8894a6',keyI:0.8,hemiSky:'#4c5260',hemiGround:'#1e2026',hemiI:0.85,fogNear:11,fogFar:48,env:0.3,exposure:1.05,beam:0,rain:.2,storm:0,waves:1.3,wind:.6,wet:.4,deep:'#0a1a22',shallow:'#1d3d44',waterBright:.2,lamps:0}
 };
-const CAMPAIGN=['dusk','dusk','sunset','gloaming','blue','night','night','deep','storm','drizzle','abyss'];
-const ENDLESS=['night','storm','abyss','deep','drizzle'];
+// The sky of the wave being fought, or of the next one while the keeper prepares. The wave table in game.js decides it.
 export function moodFor(game) {
   if(game.phase==='won')return 'dawn';
   if(game.phase==='lost')return 'lost';
-  const upcoming=game.phase==='wave'?game.wave:game.wave+1;
-  return upcoming<=10?CAMPAIGN[upcoming]:ENDLESS[(upcoming-11)%ENDLESS.length];
+  return waveDefinition(Math.max(1,game.phase==='wave'?game.wave:game.wave+1)).sky;
 }
 
 const COLOR_KEYS=['top','horizon','bottom','sunColor','cloudColor','cloudShadow','keyColor','hemiSky','hemiGround','deep','shallow'];
