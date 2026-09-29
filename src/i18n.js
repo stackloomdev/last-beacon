@@ -265,7 +265,7 @@ export const messages = {
   'help.beamText': ['点击地面，灯塔会把光束压低照向那里，光斑在战斗中停留 12 秒，再次点击随时移动。被照亮的敌人受到炮塔伤害 +25%，速度 −15%。按 B 自动照向敌群；两波之间也能提前摆好位置。', 'Click the ground and the lighthouse lowers its beam there. The pool of light stays for 12 seconds during a wave; click again to move it at any time. Lit enemies take 25% more tower damage and move 15% slower. Press B to light the thickest group; you can also place it between waves.'],
   'help.nightLabel': ['04 / 黑夜', '04 / NIGHT'],
   'help.nightTitle': ['夜里，只有被照亮的敌人无处可藏。', 'At night, only light gives them away.'],
-  'help.nightText': ['第 5、6、7、10 波在夜里来袭。夜里炮塔只能看清射程 70% 以内的敌人；更远的敌人必须站在光束、灯塔周围 2.6 格或通电中继站周围 1.5 格的灯光里。深渊巨像的熔核会暴露它自己。', 'Waves 5, 6, 7 and 10 arrive at night. Towers then only make out enemies within 70% of their range; farther enemies must stand in the beam, within 2.6 tiles of the lighthouse or within 1.5 tiles of a powered relay. The Colossus is betrayed by its own molten core.'],
+  'help.nightText': ['第 5、6、7、10 波在夜里来袭。夜里炮塔只能看清射程 70% 以内的敌人；更远的敌人必须站在光束、灯塔周围 2.6 格或通电中继站周围 1.5 格的灯光里。电弧也只会跳向看得见的敌人；深渊巨像的熔核会暴露它自己。', 'Waves 5, 6, 7 and 10 arrive at night. Towers then only make out enemies within 70% of their range; farther enemies must stand in the beam, within 2.6 tiles of the lighthouse or within 1.5 tiles of a powered relay. Arc lightning only jumps to enemies a tower could see; the Colossus is betrayed by its own molten core.'],
   'wave.endless': ['无尽潮汐 · 第 {wave} 波', 'Endless tide · wave {wave}']
 };
 

@@ -226,3 +226,14 @@ test('at night towers only engage distant enemies that stand in light',()=>{
   const day=new Game({starter:false});day.credits=1000;const dayGun=day.build('gun',1).tower;day.startWave();day.queue=[];
   const far=place(day,'crawler',13);assert.equal(day.pickTarget(dayGun,range),far,'daylight hides nothing');
 });
+test('at night arc lightning only jumps to enemies the tower could see',()=>{
+  const g=new Game({starter:false});g.credits=1000;const arc=g.build('arc',3).tower,stats=towerStats(arc);
+  g.aimBeam(7,5.2);advance(g,BEAM.lower+.05);g.wave=4;g.startWave();g.queue=[];
+  const lead=place(g,'tank',12.8),dark=place(g,'tank',11.6);
+  assert.equal(lead.lit,true);assert.equal(dark.seen,false);assert.ok(dist(lead,dark)<=stats.chainRange);
+  assert.ok(dist(arc,lead)>stats.range*DARK.sight&&dist(arc,dark)>stats.range*DARK.sight);
+  assert.equal(g.pickTarget(arc,stats.range),lead);
+  assert.deepEqual(g.chainTargets(lead,stats,arc),[lead],'the unlit neighbour stays out of the chain');
+  g.aimBeam(7,6.8);advance(g,.3);assert.equal(dark.lit,true);
+  assert.deepEqual(g.chainTargets(lead,stats,arc),[lead,dark],'once lit it can be chained');
+});

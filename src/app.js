@@ -220,8 +220,11 @@ function openMenu(id,keyboard=false){
   if(keyboard)(towerAt(id)?towerMenu.querySelector('.upgrade,.sell'):ringOptions.find(o=>!o.disabled))?.focus({preventScroll:true});
 }
 function closeMenus(){
+  // Keyboard focus inside a closing menu returns to its pad, so the next Enter reopens it.
+  const pad=selectedPad,inside=ring.contains(document.activeElement)||towerMenu.contains(document.activeElement);
   selectedPad=null;if(renderer){renderer.selected=null;renderer.buildType=buildType;renderer.hover=hoverPad;}
   ring.hidden=true;ring.classList.remove('open');towerMenu.hidden=true;lastMenu='';
+  if(inside&&pad!==null)padButtons[pad].focus({preventScroll:true});
 }
 function renderMenus(){
   const tower=selectedPad!==null?towerAt(selectedPad):null;
@@ -240,6 +243,8 @@ function renderMenus(){
   const stat=(label,value,extra='')=>`<div><span>${t(label)}</span><strong>${value}</strong>${extra}</div>`;
   const stats=relay?[stat('stat.link','4.8'),stat('stat.lamp',DARK.lamp.toFixed(1)),stat('stat.power',0)]
     :[stat('stat.damage',Math.round(def.damage),delta(def.damage,next?.damage,Math.round)),stat('stat.range',def.range.toFixed(1),delta(def.range,next?.range,v=>v.toFixed(2))),def.chain?stat('stat.chain',def.chain,delta(def.chain,next?.chain)):stat('stat.power',def.power,delta(def.power,next?.power))];
+  const focused=towerMenu.contains(document.activeElement)?document.activeElement:null;
+  const refocus=focused&&(focused.dataset.target?`[data-target="${focused.dataset.target}"]`:focused.classList.contains('upgrade')?'.upgrade':focused.classList.contains('sell')?'.sell':'.tm-close');
   towerMenu.innerHTML=`<div class="tm-head"><h3>${towerName(tower.type)}</h3><span class="tm-level">LV ${tower.level} / ${relay?1:3}</span><button class="tm-close" type="button" aria-label="${t('ring.close')}">×</button></div>
     <span class="tm-status ${tower.powered?'':'offline'}">● ${t(tower.powered?'tower.powered':tower.connected?'tower.overload':'tower.disconnected')}</span>
     <div class="tm-stats">${stats.join('')}</div>
@@ -251,6 +256,7 @@ function renderMenus(){
   for(const button of towerMenu.querySelectorAll('[data-target]'))button.addEventListener('click',()=>{if(game.setTargeting(tower.id,button.dataset.target))announceTarget(tower);});
   towerMenu.querySelector('.upgrade')?.addEventListener('click',()=>upgradeTower(tower));
   towerMenu.querySelector('.sell').addEventListener('click',()=>{game.sell(tower.id);closeMenus();updateHud();toast('toast.sold');});
+  if(refocus)(towerMenu.querySelector(`${refocus}:not(:disabled)`)||towerMenu.querySelector('.sell'))?.focus({preventScroll:true});
 }
 function upgradeTower(tower){
   const result=game.upgrade(tower.id);
@@ -356,8 +362,14 @@ $('confirm-restart').addEventListener('click',()=>{difficulty=pendingDifficulty;
 $('play-again').addEventListener('click',reset);
 $('view-island').addEventListener('click',()=>closeDialog('result-dialog'));
 $('endless').addEventListener('click',()=>{if(game.continueEndless()){closeDialog('result-dialog');persistBest();updateHud();}});
+// Inside the build ring or a tower card, a keyboard-focused button keeps Space for itself (build, upgrade, sell, targeting).
+// Everywhere else, and after pointer clicks, Space stays the start / pause shortcut; Enter still activates any focused button.
+let keyboardNavigation=false;
+addEventListener('pointerdown',()=>{keyboardNavigation=false;},true);
+addEventListener('keydown',e=>{if(e.key==='Tab'||e.key==='Enter')keyboardNavigation=true;},true);
 document.addEventListener('keydown',e=>{
   if(document.querySelector('dialog[open]')||e.target.matches('input,textarea,select')||e.metaKey||e.ctrlKey||e.altKey)return;
+  if(e.code==='Space'&&keyboardNavigation&&e.target.closest?.('#build-ring,#tower-menu'))return;
   if(e.code==='Space')e.preventDefault();
   const key=e.key.toLowerCase(),view=renderer.kind==='3d';
   if(view&&['q','e','arrowleft','arrowright'].includes(key)){e.preventDefault();renderer.rotateView(key==='q'||key==='arrowleft'?-1:1);return;}

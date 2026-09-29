@@ -246,11 +246,12 @@ export class Game {
     }
     return best;
   }
-  chainTargets(first,stats) {
-    const chain=[first];
+  // Lightning jumps between nearby enemies; at night it only jumps to ones the tower itself could see.
+  chainTargets(first,stats,tower=null) {
+    const chain=[first],night=!!tower&&this.isNight(),sight=stats.range*DARK.sight;
     while(chain.length<stats.chain) {
       const last=chain.at(-1);let next=null,closest=Infinity;
-      for(const e of this.enemies){if(e.hp<=0||chain.includes(e))continue;const d=dist(last,e);if(d<=stats.chainRange&&d<closest){closest=d;next=e;}}
+      for(const e of this.enemies){if(e.hp<=0||chain.includes(e)||(night&&!e.seen&&dist(tower,e)>sight))continue;const d=dist(last,e);if(d<=stats.chainRange&&d<closest){closest=d;next=e;}}
       if(!next)break;chain.push(next);
     }
     return chain;
@@ -298,7 +299,7 @@ export class Game {
         if(t.cooldown<=0) {
           t.cooldown=stats.cooldown;
           const p={x:t.x,y:t.y,fromX:t.x,fromY:t.y,toX:e.x,toY:e.y,target:e.id,tower:t.id,kind:t.type,damage:stats.damage,splash:stats.splash,slow:stats.slow,age:0,duration:t.type==='mortar'?.65:.15};
-          if(t.type==='arc') {const chain=this.chainTargets(e,stats);Object.assign(p,{chain:chain.map(c=>c.id),points:chain.map(c=>({x:c.x,y:c.y})),falloff:stats.falloff,duration:.12});}
+          if(t.type==='arc') {const chain=this.chainTargets(e,stats,t);Object.assign(p,{chain:chain.map(c=>c.id),points:chain.map(c=>({x:c.x,y:c.y})),falloff:stats.falloff,duration:.12});}
           this.projectiles.push(p);
           this.emit('shoot',{kind:t.type,x:t.x,y:t.y,tower:t.id,toX:e.x,toY:e.y,points:p.points});
         }
