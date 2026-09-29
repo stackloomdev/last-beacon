@@ -3,7 +3,7 @@ import {PADS,SOURCE,TYPES,PATH,PATH_LENGTH,pathPosition,towerStats,STRIKE,BEAM,D
 import {HeightField,createTerrain,scatter,PAD_Y,PAD_TOP,LIGHTHOUSE_Y,COTTAGE,PIER,MAX_DECALS,MAX_LAMPS,ROAD_Y,mulberry} from './terrain.js';
 import {createWater} from './water.js';
 import {Atmosphere,moodFor} from './sky.js';
-import {createMaterials,buildLighthouse,buildPads,buildTower,CREATURES,clawGeometry,treeGeometries,rockGeometry,grassGeometry,islandGeometry,stackGeometry,buildCottage,buildPier,buildBoat,buildBuoy,birdGeometry,merge,part} from './models.js';
+import {createMaterials,buildLighthouse,buildPads,buildTower,CREATURES,clawGeometry,treeGeometries,rockGeometry,grassGeometry,islandGeometry,islandHeight,stackGeometry,buildCottage,buildPier,buildBoat,buildBuoy,birdGeometry,merge,part} from './models.js';
 import {Particles,Debris,Ribbons,Rings,createRain,Labels,atlasTexture,SPRITE} from './effects.js';
 import {CameraRig} from './camera.js';
 import {Bloom} from './post.js';
@@ -165,10 +165,17 @@ export class World3D {
       return {mesh:m,light,phase:i*1.7,base:m.position.clone()};
     });
     // Distant islands close the horizon; one keeps its own small light burning at night.
-    const far=[[-44,-34,9,5,1.1,1],[-66,8,13,6,.8,2],[34,-52,11,4.5,.7,3],[58,-14,7,3.2,1.4,4]];
-    for(const [x,z,radius,height,rot,seed] of far){const m=new THREE.Mesh(islandGeometry(seed,{radius,height}),mats.stone);m.position.set(x,0,z);m.rotation.y=rot;m.receiveShadow=false;this.scene.add(m);}
-    this.farLight=new THREE.Mesh(new THREE.SphereGeometry(.18,8,6),new THREE.MeshBasicMaterial({color:'#ffe2a8'}));this.farLight.position.set(-44+5.5,3.1,-34+2);this.scene.add(this.farLight);
-    const tower=new THREE.Mesh(new THREE.CylinderGeometry(.14,.2,1.3,8),new THREE.MeshStandardMaterial({color:'#d9d2bd',roughness:.8}));tower.position.set(-44+5.5,2.3,-34+2);this.scene.add(tower);
+    // They take extra haze so they read as far-off land rather than dark shapes against the sky.
+    const hazy=o=>{const m=new THREE.MeshStandardMaterial({roughness:1,metalness:0,...o});m.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <fog_fragment>',`#ifdef USE_FOG
+float fogFactor=smoothstep(fogNear*.5,fogFar,vFogDepth);gl_FragColor.rgb=mix(gl_FragColor.rgb,fogColor,clamp(.4+.6*fogFactor,0.,.9));
+#endif`);};return m;},haze=hazy({vertexColors:true});
+    const far=[[-46,-36,11,2.6,1.1,1],[-68,8,15,3.2,.8,2],[36,-54,12,2.3,.7,3],[60,-15,8,1.7,1.4,4]];
+    for(const [x,z,radius,height,rot,seed] of far){const m=new THREE.Mesh(islandGeometry(seed,{radius,height}),haze);m.position.set(x,0,z);m.rotation.y=rot;this.scene.add(m);}
+    // The little lighthouse stands on the first island's high ground, placed through the island's own rotation.
+    const [fx,fz,fr,fh,frot,fseed]=far[0],lx=2.2,lz=.8,ly=Math.max(.1,islandHeight(fseed,{radius:fr,height:fh},lx,lz));
+    const wx=fx+lx*Math.cos(frot)+lz*Math.sin(frot),wz=fz-lx*Math.sin(frot)+lz*Math.cos(frot);
+    const tower=new THREE.Mesh(new THREE.CylinderGeometry(.14,.2,1.3,8),hazy({color:'#d9d2bd'}));tower.position.set(wx,ly+.55,wz);this.scene.add(tower);
+    this.farLight=new THREE.Mesh(new THREE.SphereGeometry(.18,8,6),new THREE.MeshBasicMaterial({color:'#ffe2a8'}));this.farLight.position.set(wx,ly+1.35,wz);this.scene.add(this.farLight);
     // Sea stacks stand off the northern cliffs.
     for(const [x,y,s,seed] of [[3.4,-2.4,.8,1],[9.4,-2.7,.62,2],[-2,.8,.5,3]]){
       const p=this.at(x,y);const m=new THREE.Mesh(stackGeometry(seed),mats.stone);m.position.set(p.x,-.4,p.z);m.scale.set(s,s*(.85+seed*.1),s);m.rotation.y=seed*1.7;m.castShadow=m.receiveShadow=q.shadow>0;this.scene.add(m);

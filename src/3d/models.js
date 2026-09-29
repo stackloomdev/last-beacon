@@ -342,14 +342,22 @@ export function rockGeometry(seed) {
   const out=new THREE.BufferGeometry();out.setAttribute('position',g.attributes.position);out.setAttribute('normal',g.attributes.normal);out.setAttribute('color',g.attributes.color);out.setIndex(g.index);
   return out;
 }
-export function islandGeometry(seed,{radius=8,height=4,depth=.7}={}) {
-  const g=new THREE.SphereGeometry(1,64,14,0,TAU,0,Math.PI/2),pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color(),forest=new THREE.Color('#26332c'),rock=new THREE.Color('#58605a'),shore=new THREE.Color('#6d6a5c');
+// A distant island: a low, ragged skyline raised from a height field, with a summit off centre and a pale shore where it meets the water.
+// Built on a flat grid rather than a dome, so there is no seam and it sits on the sea instead of hanging above it.
+export function islandHeight(seed,{radius=8,height=3,depth=.7}={},x,z) {
+  const u=x/radius,v=z/(radius*depth),a=Math.atan2(v,u);
+  const d=Math.hypot(u,v)/(1+.16*Math.sin(a*3+seed)+.07*Math.sin(a*7+seed*2.1));
+  if(d>=1)return -.6;
+  const hills=.5+.28*Math.sin(u*3.3+seed)+.18*Math.sin(v*5.1-seed*1.4)+.1*Math.sin((u-v)*9.7+seed*.6);
+  const summit=Math.exp(-((u-.3*Math.cos(seed*1.9))**2+(v-.25*Math.sin(seed*1.3))**2)*3.4);
+  return height*(1-d)**1.25*(hills*.65+summit)-.06;
+}
+export function islandGeometry(seed,options={}) {
+  const {radius=8,depth=.7}=options,g=new THREE.PlaneGeometry(radius*2.1,radius*depth*2.1,72,36);g.rotateX(-Math.PI/2);
+  const pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color(),shore=new THREE.Color('#8b8676'),forest=new THREE.Color('#29362e'),rock=new THREE.Color('#5d615b');
   for(let i=0;i<pos.count;i++){
-    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),a=Math.atan2(z,x);
-    const ridge=1+.38*Math.sin(a*2+seed)+.2*Math.sin(a*5+seed*2.3)+.1*Math.sin(a*11+seed*.7),r=radius*(1+.14*Math.sin(a*3+seed*1.7)+.06*Math.sin(a*9+seed));
-    const up=Math.pow(y,.75)*Math.max(.35,ridge);
-    pos.setXYZ(i,x*r,height*up-.8,z*r*depth);
-    c.copy(shore).lerp(forest,Math.min(1,y*9)).lerp(rock,Math.max(0,Math.min(1,(up-.62)*3)));col.set([c.r,c.g,c.b],i*3);
+    const x=pos.getX(i),z=pos.getZ(i),y=islandHeight(seed,options,x,z);pos.setY(i,y);
+    c.copy(shore).lerp(forest,Math.min(1,Math.max(0,(y-.08)*5))).lerp(rock,Math.min(1,Math.max(0,(y-(options.height??3)*.55)*1.4)));col.set([c.r,c.g,c.b],i*3);
   }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();return g;
 }
