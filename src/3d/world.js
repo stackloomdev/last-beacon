@@ -530,7 +530,8 @@ export class World3D {
     const dying=lost?Math.max(0,1-this.lostT/1.6)*(Math.sin(this.lostT*40)>0?1:.3):1;
     const od=g.overdrive>0?1.5:1,power=clamp(s.beam,0,3)*flicker*dying*(1-this.hurt*.6)*od*(1+this.beamPulse*.6);
     // The lamp sweeps the horizon until the keeper lowers it; then it swings round and pins a pool of light to the island.
-    const spot=g.beam.spot,lamp=this.lamp.position;let goalTilt=.07;
+    // Once the watch is over the keeper lets go: the beam rises back to the horizon.
+    const spot=g.canEdit()?g.beam.spot:null,lamp=this.lamp.position;let goalTilt=.07;
     if(spot){
       const c=this.at(spot.x,spot.y,0,_v2),dx=c.x-lamp.x,dz=c.z-lamp.z,flat=Math.hypot(dx,dz);
       let d=Math.atan2(-dz,dx)-this.beamYaw;d=Math.atan2(Math.sin(d),Math.cos(d));this.beamYaw+=d*(1-Math.exp(-dt*(this.strike?14:8)));

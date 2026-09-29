@@ -146,7 +146,7 @@ export class Renderer {
     const glow=c.createRadialGradient(light.x,light.y,1,light.x,light.y,s*1.55);
     glow.addColorStop(0,'#ffe6a284');glow.addColorStop(.35,'#f8cd6520');glow.addColorStop(1,'#f7c46400');
     this.circle(light,s*1.55,glow);this.circle(light,s*.085,'#fff1be');
-    const spot=this.game.beam.spot;
+    const spot=this.game.canEdit()?this.game.beam.spot:null;
     c.save();c.globalCompositeOperation='screen';
     if(spot&&this.game.beam.charge>.2){
       // Lowered beam: a wedge from the lamp that widens into the pool of light.
@@ -277,7 +277,7 @@ export class Renderer {
     if(target&&chosen&&chosen.type!=='relay'&&(g.isNight()||g.phase==='build'&&isNightWave(g.wave+1))){
       const r=towerStats(chosen).range*DARK.sight,pts=Array.from({length:49},(_,i)=>this.p(target.x+Math.cos(i/48*TAU)*r,target.y+Math.sin(i/48*TAU)*r,.32));this.line(pts,'#dfe6ffb0',1.2,[3,5]);
     }
-    const spot=g.beam.spot,glow=spot?Math.min(1,g.beam.charge):0;
+    const spot=g.canEdit()?g.beam.spot:null,glow=spot?Math.min(1,g.beam.charge):0;
     if(glow>0){
       const e=this.groundEllipse(spot.x,spot.y,BEAM.radius);c.save();c.globalCompositeOperation='screen';
       const pool=c.createRadialGradient(e.x,e.y,0,e.x,e.y,e.rx);pool.addColorStop(0,`rgba(255,232,180,${.5*glow})`);pool.addColorStop(.7,`rgba(255,226,160,${.22*glow})`);pool.addColorStop(1,'rgba(255,226,160,0)');
