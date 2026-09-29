@@ -45,7 +45,7 @@ export const direction=([az,el],out=new THREE.Vector3())=>{const a=THREE.MathUti
 const SKY_VERTEX=`varying vec3 vDir;void main(){vDir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
 const SKY_FRAGMENT=`
 uniform vec3 uTop,uHorizon,uBottom,uSunDir,uSunColor,uMoonDir,uCloudColor,uCloudShadow;
-uniform float uSunGlow,uMoonGlow,uStars,uClouds,uTime,uFlash,uWind;
+uniform float uSunGlow,uMoonGlow,uStars,uClouds,uTime,uFlash,uWind,uEnvPass;
 varying vec3 vDir;
 float h21(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+1.),f.x),f.y);}
@@ -58,7 +58,8 @@ void main(){
   col+=uSunColor*smoothstep(.9985,.9992,sd)*3.*uSunGlow;
   float md=max(dot(d,uMoonDir),0.);
   float disc=smoothstep(.99955,.99975,md);
-  col+=vec3(.8,.86,1.)*(disc*(1.3-.35*vn(d.xy*900.))+pow(md,90.)*.18+pow(md,12.)*.05)*uMoonGlow;
+  // The moon disc is kept out of the reflection map: blurred, it would smear into blobs on the sea. The water draws its glitter path instead.
+  col+=vec3(.8,.86,1.)*(disc*(1.3-.35*vn(d.xy*900.))*(1.-uEnvPass*.9)+pow(md,90.)*.18*(1.-uEnvPass*.7)+pow(md,12.)*.05)*uMoonGlow;
   if(uStars>0.&&y>0.){
     vec2 g=vec2(atan(d.z,d.x)*95.,asin(y)*95.);vec2 c=floor(g);float r=h21(c);
     float tw=.55+.45*sin(uTime*(1.5+r*3.)+r*40.);
@@ -83,7 +84,7 @@ export class Atmosphere {
     this.renderer=renderer;this.scene=scene;this.name=null;this.flash=0;this.flashTimer=6;this.onLightning=null;
     this.current=parse(MOODS.dusk);this.target=parse(MOODS.dusk);
     this.uniforms={uTop:{value:new THREE.Color()},uHorizon:{value:new THREE.Color()},uBottom:{value:new THREE.Color()},uSunDir:{value:new THREE.Vector3()},uSunColor:{value:new THREE.Color()},
-      uMoonDir:{value:new THREE.Vector3()},uCloudColor:{value:new THREE.Color()},uCloudShadow:{value:new THREE.Color()},uSunGlow:{value:0},uMoonGlow:{value:0},uStars:{value:0},uClouds:{value:0},uTime:{value:0},uFlash:{value:0},uWind:{value:0}};
+      uMoonDir:{value:new THREE.Vector3()},uCloudColor:{value:new THREE.Color()},uCloudShadow:{value:new THREE.Color()},uSunGlow:{value:0},uMoonGlow:{value:0},uStars:{value:0},uClouds:{value:0},uTime:{value:0},uFlash:{value:0},uWind:{value:0},uEnvPass:{value:0}};
     this.material=new THREE.ShaderMaterial({uniforms:this.uniforms,vertexShader:SKY_VERTEX,fragmentShader:SKY_FRAGMENT,side:THREE.BackSide,depthWrite:false,fog:false});
     this.geometry=new THREE.SphereGeometry(400,48,24);
     this.sky=new THREE.Mesh(this.geometry,this.material);this.sky.frustumCulled=false;this.sky.renderOrder=-10;scene.add(this.sky);
@@ -139,7 +140,7 @@ export class Atmosphere {
     this.envAge+=realDt;
     if(this.envDirty||(moving>.02&&this.envAge>1.2)) {
       this.envAge=0;this.envDirty=false;
-      const next=this.pmrem.fromScene(this.envScene,0,.1,1000,{size:128});
+      this.uniforms.uEnvPass.value=1;const next=this.pmrem.fromScene(this.envScene,0,.1,1000,{size:128});this.uniforms.uEnvPass.value=0;
       this.scene.environment=next.texture;this.envTarget?.dispose();this.envTarget=next;
     }
   }

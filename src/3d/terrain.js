@@ -26,13 +26,24 @@ export const padDistance=(x,y)=>PADS.reduce((d,p)=>Math.min(d,Math.hypot(x-p.x,y
 export const islandShape=(x,y)=>Math.hypot((x-6.5)/7.25,(y-5.5)/6.25)+fbm(x*.21+3.1,y*.21-1.7,3)*.11;
 const roadLevel=x=>x>1.1?ROAD_Y:-.78+(ROAD_Y+.78)*smoothstep(-1.9,1.1,x);
 
+// Shore character around the island: 0 is a sandy beach, 1 a cliff. The slipway where enemies land and the pier cove stay sandy.
+export function cliffiness(x,y) {
+  let c=clamp01(fbm(x*.13+11,y*.13+5,2)*1.7+.6+.4*smoothstep(4.5,.5,y));
+  c*=smoothstep(1.3,3.8,Math.hypot(x+.9,y-4));
+  c*=smoothstep(1.3,3.2,Math.hypot(x-13.6,y-7.8));
+  return c;
+}
 export function groundHeight(x,y) {
   const e=islandShape(x,y),dRoad=roadDistance(x,y),dPad=padDistance(x,y),dLight=Math.hypot(x-SOURCE.x,y-SOURCE.y);
   const open=clamp01((Math.min(dRoad-1,dPad-1,dLight-1.6,Math.hypot(x-COTTAGE.x,y-COTTAGE.y)-1.3))/1.6);
-  const land=.46+fbm(x*.6,y*.6,3)*.05+Math.max(0,fbm(x*.31+7,y*.31+2,3))*.62*open;
-  const sea=Math.max(-2.7,-.18-(e-.98)*4.2);
-  const cliff=clamp01(fbm(x*.13+11,y*.13+5,2)*1.9+.3);
-  const edge=smoothstep(1.03,.84,e)*(1-cliff)+smoothstep(.992,.962,e)*cliff;
+  const cliff=cliffiness(x,y);
+  // Headlands rise towards the cliff edge wherever nothing is built, so the coast is not one even step.
+  const rim=cliff*open*smoothstep(.62,.93,e)*(.55+.45*fbm(x*.45+3,y*.45-8,2));
+  const land=.46+fbm(x*.6,y*.6,3)*.05+Math.max(0,fbm(x*.31+7,y*.31+2,3))*.62*open+rim*1.05;
+  // Beaches shelve gently; below cliffs a wave-cut rock platform sits just under the surface before the seabed drops away.
+  const shelf=Math.max(-2.7,-.18-(e-.98)*4.2),platform=Math.max(-2.7,-.07-Math.max(0,e-1.02)*5.5);
+  const sea=shelf+(platform-shelf)*cliff;
+  const edge=smoothstep(1.04,.84,e)*(1-cliff)+smoothstep(.998,.958,e)*cliff;
   let h=Math.min(sea,land)+(land-Math.min(sea,land))*edge;
   h+=(roadLevel(x)-h)*smoothstep(1,.55,dRoad);
   h+=(PAD_Y-h)*smoothstep(.85,.5,dPad);
@@ -95,7 +106,16 @@ const C=hex=>new THREE.Color(hex);
 const PALETTE={grassA:C('#4d6a35'),grassB:C('#68853f'),grassC:C('#7f9150'),dry:C('#9a955d'),road:C('#8c7658'),roadLight:C('#a58f6b'),rut:C('#6d5b45'),
   gravel:C('#8f8d7f'),sand:C('#d3c196'),wetSand:C('#a39170'),rock:C('#7b766b'),rockDark:C('#5f5b53'),seabed:C('#b8a67c'),deep:C('#4f5a52'),stone:C('#9e9c8f')};
 
-export const MAX_DECALS=16,MAX_LAMPS=8;
+export const MAX_DECALS=24,MAX_LAMPS=8;
+// Raindrop rings: one drop per cell at a random spot, its ring spreading and fading. Returns a slope to perturb a normal with.
+export const RIPPLES=`
+float rh(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
+vec2 ripple(vec2 p,float t){
+  vec2 i=floor(p),f=fract(p),c=.3+.4*vec2(rh(i+17.1),rh(i+31.7));
+  float ph=fract(t*.9+rh(i)),r=ph*.3;vec2 d=f-c;float l=length(d);
+  float ring=sin((l-r)*70.)*(1.-ph)*(1.-smoothstep(0.,.05,abs(l-r)));
+  return d/max(l,1e-3)*ring;
+}`;
 export function createTerrain(field,quality) {
   const step=quality==='high'?.085:quality==='medium'?.12:.16;
   const w=GRID.x1-GRID.x0,d=GRID.y1-GRID.y0,sx=Math.round(w/step),sy=Math.round(d/step);
@@ -106,52 +126,96 @@ export function createTerrain(field,quality) {
     pos.setXYZ(i,X,groundHeight(g.x,g.y),Z);uv.setXY(i,X*.55,Z*.55);
   }
   geo.computeVertexNormals();
-  const colors=new Float32Array(pos.count*3),normal=geo.attributes.normal,c=new THREE.Color(),roadColor=new THREE.Color();
+  const colors=new Float32Array(pos.count*3),puddles=new Float32Array(pos.count*2),normal=geo.attributes.normal,c=new THREE.Color(),roadColor=new THREE.Color();
   for(let i=0;i<pos.count;i++){
     const X=pos.getX(i),h=pos.getY(i),Z=pos.getZ(i),g=fromWorld(X,Z),slope=1-normal.getY(i);
     const dRoad=roadDistance(g.x,g.y),dPad=padDistance(g.x,g.y),n=fbm(g.x*.8,g.y*.8,3),n2=noise(g.x*3.1,g.y*3.1);
     c.copy(PALETTE.grassA).lerp(PALETTE.grassB,clamp01(.5+n*1.4)).lerp(PALETTE.grassC,clamp01(n2*.8)*.5).lerp(PALETTE.dry,clamp01(fbm(g.x*.27+9,g.y*.27,2)*2.2-.35));
-    c.lerp(PALETTE.sand,smoothstep(.3,.12,h)).lerp(PALETTE.wetSand,smoothstep(.1,.01,h));
+    // Sand only where the ground shelves gently; steep faces are left to the layered rock drawn in the shader.
+    const gentle=1-smoothstep(.16,.34,slope);
+    c.lerp(PALETTE.sand,smoothstep(.3,.12,h)*gentle).lerp(PALETTE.wetSand,smoothstep(.1,.01,h)*gentle);
     if(h<0)c.copy(PALETTE.seabed).lerp(PALETTE.deep,smoothstep(-.1,-1.6,h));
     c.lerp(n2>0?PALETTE.rock:PALETTE.rockDark,smoothstep(.22,.42,slope));
     const road=smoothstep(.62,.36,dRoad);
     if(road>0)c.lerp(roadColor.copy(PALETTE.road).lerp(PALETTE.roadLight,clamp01(.5+n2*.6)).lerp(PALETTE.rut,Math.abs(dRoad-.2)<.05?.35:0),road*(h<-.05?.35:1));
-    c.lerp(PALETTE.gravel,smoothstep(.62,.46,dPad)*.9);
+    c.lerp(PALETTE.gravel,smoothstep(.7,.5,dPad)*.75);
     c.lerp(PALETTE.stone,smoothstep(1.25,.9,Math.hypot(g.x-SOURCE.x,g.y-SOURCE.y))*.7);
     colors.set([c.r,c.g,c.b],i*3);
+    // Where rain can pool: the road above the tideline, most of all in its wheel ruts.
+    puddles[i*2]=road*smoothstep(.04,.14,h);puddles[i*2+1]=1-smoothstep(.03,.09,Math.abs(dRoad-.2));
   }
-  geo.setAttribute('color',new THREE.BufferAttribute(colors,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(colors,3));geo.setAttribute('aPuddle',new THREE.BufferAttribute(puddles,2));
   const detail=detailTexture();
   const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.93,metalness:0,map:detail,bumpMap:detail,bumpScale:1.4});
-  const uniforms={uTime:{value:0},uWet:{value:0},uSun:{value:1},uCloud:{value:0},uRange:{value:new THREE.Vector4(0,0,0,0)},uRangeColor:{value:new THREE.Color('#f1d697')},
+  const uniforms={uTime:{value:0},uWet:{value:0},uRain:{value:0},uHeat:{value:new Float32Array(MAX_DECALS)},uDecalCount:{value:0},uLampCount:{value:0},uSun:{value:1},uCloud:{value:0},uRange:{value:new THREE.Vector4(0,0,0,0)},uRangeColor:{value:new THREE.Color('#f1d697')},
     uAim:{value:new THREE.Vector4(0,0,0,0)},uAimColor:{value:new THREE.Color('#ffe7a3')},uDecals:{value:Array.from({length:MAX_DECALS},()=>new THREE.Vector4())},
     uBeam:{value:new THREE.Vector4(0,0,0,0)},uBeamColor:{value:new THREE.Color('#ffe8b8')},uLamps:{value:Array.from({length:MAX_LAMPS},()=>new THREE.Vector4())},uLampColor:{value:new THREE.Color('#ffc57a')},
     uSight:{value:new THREE.Vector4(0,0,0,0)}};
   mat.onBeforeCompile=shader=>{
     Object.assign(shader.uniforms,uniforms);
-    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vGround;')
-      .replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=(modelMatrix*vec4(transformed,1.)).xyz;');
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vGround;attribute vec2 aPuddle;varying vec2 vPuddle;')
+      .replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=(modelMatrix*vec4(transformed,1.)).xyz;vPuddle=aPuddle;');
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-varying vec3 vGround;uniform float uTime,uWet,uSun,uCloud;uniform vec4 uRange,uAim,uBeam,uSight;uniform vec3 uRangeColor,uAimColor,uBeamColor,uLampColor;uniform vec4 uDecals[${MAX_DECALS}],uLamps[${MAX_LAMPS}];
+${quality==='low'?'':'#define RAIN_RIPPLES'}
+${RIPPLES}
+varying vec3 vGround;varying vec2 vPuddle;uniform float uTime,uWet,uRain,uSun,uCloud,uHeat[${MAX_DECALS}];uniform int uDecalCount,uLampCount;uniform vec4 uRange,uAim,uBeam,uSight;
+float th(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
+float tvn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(th(i),th(i+vec2(1,0)),f.x),mix(th(i+vec2(0,1)),th(i+1.),f.x),f.y);}uniform vec3 uRangeColor,uAimColor,uBeamColor,uLampColor;uniform vec4 uDecals[${MAX_DECALS}],uLamps[${MAX_LAMPS}];
 float ringMask(vec2 p,vec4 r,float w){float d=length(p-r.xy);return (1.-smoothstep(w*.5,w,abs(d-r.z)))*step(.01,r.z);}
 float caustic(vec2 p){p*=2.3;float t=uTime*.55;float c=sin(p.x+t)*sin(p.y*1.3-t*.8)+sin((p.x+p.y)*1.7+t*1.3)*.6+sin(length(p*.9)*2.1-t)*.4;return pow(max(0.,c*.5),3.);}`)
       .replace('#include <color_fragment>',`#include <color_fragment>
 float under=smoothstep(.02,-.25,vGround.y);
-diffuseColor.rgb+=vec3(.55,.75,.7)*caustic(vGround.xz)*under*uSun*smoothstep(-1.8,-.1,vGround.y)*.45;
-for(int i=0;i<${MAX_DECALS};i++){vec4 dc=uDecals[i];if(dc.w<=0.)continue;float d=length(vGround.xz-dc.xy)/dc.z;float m=(1.-smoothstep(.35,1.,d+.18*sin(atan(vGround.z-dc.y,vGround.x-dc.x)*5.+dc.x*9.)))*dc.w;diffuseColor.rgb*=1.-.72*m;}
+if(under>0.)diffuseColor.rgb+=vec3(.55,.75,.7)*caustic(vGround.xz)*under*uSun*smoothstep(-1.8,-.1,vGround.y)*.45;
+// Scorch marks stay until the wave is over; fresh ones smoulder with embers for a few seconds.
+float ember=0.;
+for(int i=0;i<${MAX_DECALS};i++){if(i>=uDecalCount)break;vec4 dc=uDecals[i];vec2 dv=vGround.xz-dc.xy;float d=length(dv)/dc.z;if(d>1.25)continue;
+  float ang=atan(dv.y,dv.x),m=(1.-smoothstep(.35,1.,d+.18*sin(ang*5.+dc.x*9.)))*dc.w;
+  m*=mix(1.,.45+.55*sin(ang*17.+dc.y*5.),smoothstep(.3,.95,d));
+  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.05,.045,.04),.8*m);
+  if(uHeat[i]>0.)ember+=uHeat[i]*m*smoothstep(.74,.92,tvn(vGround.xz*26.+float(i)*7.))*(1.-smoothstep(.05,.6,d))*(.45+.55*sin(uTime*(5.+float(i))+tvn(vGround.xz*9.)*12.));}
+// Cliff faces: layered rock with streaks, darkening into a weed-stained splash zone at the waterline.
+vec3 gn=normalize(cross(dFdx(vGround),dFdy(vGround)));
+float steep=(1.-smoothstep(.5,.8,abs(gn.y)))*smoothstep(-.45,-.12,vGround.y);
+if(steep>0.){
+  float grain=tvn(vGround.xz*1.6+vec2(vGround.y*.7));
+  vec3 strata=mix(vec3(.33,.31,.29),vec3(.53,.49,.43),.5+.5*sin(vGround.y*34.+grain*5.));
+  strata=mix(strata,vec3(.64,.6,.52),smoothstep(.74,.96,tvn(vGround.xz*3.1+vec2(vGround.y*5.)))*.55);
+  strata*=.8+.34*tvn(vec2((vGround.x+vGround.z)*7.,vGround.y*1.2));
+  float splash=smoothstep(.36,.02,vGround.y);
+  strata=mix(strata,strata*.52,splash);strata=mix(strata,vec3(.15,.21,.14),smoothstep(.13,-.03,vGround.y)*.72);
+  diffuseColor.rgb=mix(diffuseColor.rgb,strata,steep);
+}
+// Beaches: the sand stays dark up to where the last wave reached; the reach follows the swash drawn by the sea.
+float reach=.005+.075*pow(.5+.5*sin(uTime*.85+vGround.x*.37-vGround.z*.23-.5),2.);
+float swash=(1.-steep)*smoothstep(reach+.07,reach-.01,vGround.y)*step(-.06,vGround.y);
+diffuseColor.rgb*=1.-.3*swash;
 float wet=uWet*(1.-under)*smoothstep(-.05,.2,vGround.y);diffuseColor.rgb*=1.-.38*wet;
+// Puddles gather in the ruts and hollows of the road while the ground is wet, and mirror the sky.
+float puddle=0.;
+if(vPuddle.x>.01&&uWet>.05){
+  float pn=tvn(vGround.xz*1.7+3.1)*.65+tvn(vGround.xz*4.3)*.35;
+  puddle=vPuddle.x*smoothstep(.57,.68,pn+vPuddle.y*.28+(uWet-1.)*.35);
+  diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*.55+vec3(.012,.018,.024),puddle);
+}
 vec2 cq=vGround.xz*.075+vec2(uTime*.018,uTime*.007);float cl=sin(cq.x*2.1+sin(cq.y*1.7))*sin(cq.y*2.3+cos(cq.x*1.3))+.45*sin((cq.x+cq.y)*3.7);
 diffuseColor.rgb*=1.-.3*uCloud*smoothstep(.15,.75,cl);`)
-      .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(roughnessFactor,.28,wet);')
+      .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(mix(roughnessFactor,.28,max(wet,swash*.85)),.03,puddle);')
+      .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+if(puddle>0.){vec2 rg=vec2(0.);
+#ifdef RAIN_RIPPLES
+rg=(ripple(vGround.xz*3.,uTime)+ripple(vGround.xz*4.4+1.7,uTime*1.21))*uRain*.45;
+#endif
+normal=normalize(mix(normal,normalize((viewMatrix*vec4(-rg.x,1.,-rg.y,0.)).xyz),puddle));}`)
       .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
 {vec2 p=vGround.xz;float fill=(1.-step(uRange.z,length(p-uRange.xy)))*step(.01,uRange.z);
+totalEmissiveRadiance+=vec3(1.,.36,.08)*ember*3.2;
 totalEmissiveRadiance+=uRangeColor*(ringMask(p,uRange,.06)*.9+fill*.07)*uRange.w;
 float pulse=.65+.35*sin(uTime*7.);float aimFill=(1.-smoothstep(uAim.z*.2,uAim.z,length(p-uAim.xy)))*step(.01,uAim.z);
 totalEmissiveRadiance+=uAimColor*(ringMask(p,uAim,.09)*1.4*pulse+aimFill*.2)*uAim.w;
 // Pools of light: the lowered beam and relay lamps light the ground they fall on. A faint rim marks where the beam's effect ends.
 float bd=length(p-uBeam.xy)/max(uBeam.z,.001),on=step(.01,uBeam.z);
 totalEmissiveRadiance+=(diffuseColor.rgb*(1.-smoothstep(.3,1.,bd))*1.7+(1.-smoothstep(0.,.04,abs(bd-1.)))*.1)*uBeamColor*uBeam.w*on;
-for(int i=0;i<${MAX_LAMPS};i++){vec4 l=uLamps[i];if(l.w<=0.)continue;float d=length(p-l.xy)/l.z;totalEmissiveRadiance+=diffuseColor.rgb*uLampColor*(1.-smoothstep(.2,1.,d))*l.w*2.6;}
+for(int i=0;i<${MAX_LAMPS};i++){if(i>=uLampCount)break;vec4 l=uLamps[i];if(l.w<=0.)continue;float d=length(p-l.xy)/l.z;totalEmissiveRadiance+=diffuseColor.rgb*uLampColor*(1.-smoothstep(.2,1.,d))*l.w*2.6;}
 // Night sight: the dashed inner ring a tower can make out without light.
 float dash=step(.5,fract(atan(p.y-uSight.y,p.x-uSight.x)*3.8197));
 totalEmissiveRadiance+=uRangeColor*ringMask(p,uSight,.05)*dash*.85*uSight.w;}`);
@@ -179,7 +243,7 @@ export function scatter(field) {
   for(let i=0;i<9000&&grass.length<2600;i++){
     const px=-1+rand()*15,py=-1+rand()*13,h=field.sample(px,py);
     if(h<.3||blocked(px,py,.5))continue;
-    grass.push({x:px,y:py,h,scale:.6+rand()*.7,rot:rand()*Math.PI*2,tint:rand()});
+    grass.push({x:px,y:py,h,scale:.42+rand()*.42,rot:rand()*Math.PI*2,tint:rand()});
     if(rand()<.1)flowers.push({x:px+(rand()-.5)*.2,y:py+(rand()-.5)*.2,h,color:rand()});
   }
   return {trees,rocks,grass,flowers};

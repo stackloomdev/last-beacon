@@ -1,12 +1,15 @@
 import * as THREE from '../../vendor/three.module.min.js';
+import {MAX_DECALS} from './terrain.js';
 
 const TAU=Math.PI*2;
 const _m=new THREE.Matrix4(),_q=new THREE.Quaternion(),_e=new THREE.Euler(),_s=new THREE.Vector3(),_p=new THREE.Vector3(),_d=new THREE.Vector3(),_up=new THREE.Vector3(0,1,0);
 
 // Every model is assembled from primitives baked into one vertex-coloured geometry per material.
+// Pass color null to keep the vertex colours a geometry already carries.
 export function part(geometry,color,{p=[0,0,0],r=[0,0,0],s=[1,1,1]}={}) {
   const g=geometry.index?geometry.toNonIndexed():geometry.clone();geometry.dispose();
   g.applyMatrix4(_m.compose(_p.set(...p),_q.setFromEuler(_e.set(...r)),_s.set(...s)));
+  if(color===null&&g.attributes.color)return g;
   const c=new THREE.Color(color),n=g.attributes.position.count,col=new Float32Array(n*3);
   for(let i=0;i<n;i++){col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;}
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
@@ -30,24 +33,36 @@ export function merge(parts) {
 }
 const mesh=(parts,material,shadow=true)=>{const m=new THREE.Mesh(merge(parts),material);m.castShadow=shadow;m.receiveShadow=true;return m;};
 
-export function createMaterials() {
+export function createMaterials({decals=null}={}) {
   const std=o=>new THREE.MeshStandardMaterial({vertexColors:true,...o});
-  const wind={uTime:{value:0},uWind:{value:.4}};
-  const foliage=std({roughness:.86,metalness:0});
-  foliage.onBeforeCompile=shader=>{
-    Object.assign(shader.uniforms,wind);
-    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nuniform float uTime,uWind;')
-      .replace('#include <begin_vertex>',`#include <begin_vertex>
+  const wind={uTime:{value:0},uWind:{value:.4}},scorch=decals||{uDecals:{value:Array.from({length:MAX_DECALS},()=>new THREE.Vector4())},uDecalCount:{value:0}};
+  // Foliage sways in the wind. Blast scorch chars the trees that stand in it, and flattens and blackens the grass.
+  const leafy=grass=>{
+    const m=std({roughness:.86,metalness:0});
+    m.onBeforeCompile=shader=>{
+      Object.assign(shader.uniforms,wind,scorch);
+      shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>\nuniform float uTime,uWind;uniform vec4 uDecals[${MAX_DECALS}];uniform int uDecalCount;varying float vBurn;`)
+        .replace('#include <begin_vertex>',`#include <begin_vertex>
+vBurn=0.;
 #ifdef USE_INSTANCING
+vec2 ip=instanceMatrix[3].xz;
+for(int i=0;i<${MAX_DECALS};i++){if(i>=uDecalCount)break;vec4 dc=uDecals[i];float d=length(ip-dc.xy)/dc.z;vBurn=max(vBurn,(1.-smoothstep(.5,1.05,d))*dc.w);}
+${grass?'transformed.y*=1.-.55*vBurn;':''}
 float sway=sin(uTime*1.6+instanceMatrix[3].x*.8+instanceMatrix[3].z*.6)+sin(uTime*2.9+instanceMatrix[3].z*1.3)*.35;
-transformed.xz+=vec2(sway,sway*.6)*uWind*.07*max(0.,position.y);
+transformed.xz+=vec2(sway,sway*.6)*uWind*.07*max(0.,position.y)*(1.-.7*vBurn);
 #endif`);
+      shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vBurn;')
+        .replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(.075,.062,.05),vBurn*.88);');
+    };
+    m.customProgramCacheKey=()=>grass?'grass':'foliage';
+    return m;
   };
+  const foliage=leafy(false),grass=leafy(true);
   return {
-    wind,foliage,
+    wind,foliage,grass,
     stone:std({roughness:.9,metalness:.02}),metal:std({roughness:.38,metalness:.78}),paint:std({roughness:.55,metalness:.3}),
-    wood:std({roughness:.84,metalness:0}),rock:std({roughness:.96,metalness:0,flatShading:true}),
-    creature:std({roughness:.42,metalness:.6}),
+    wood:std({roughness:.84,metalness:0}),rock:std({roughness:.93,metalness:0}),
+    creature:std({roughness:.3,metalness:.55}),
     glass:new THREE.MeshStandardMaterial({color:'#fff4d8',roughness:.05,metalness:.1,transparent:true,opacity:.26,depthWrite:false}),
     cable:new THREE.MeshStandardMaterial({color:'#1b2023',roughness:.6,metalness:.2,emissive:new THREE.Color('#000000')}),
     ghost:std({transparent:true,opacity:.62,depthWrite:false,emissive:new THREE.Color('#cfe3b0'),emissiveIntensity:.55,roughness:.4}),
@@ -58,17 +73,26 @@ transformed.xz+=vec2(sway,sway*.6)*uWind*.07*max(0.,position.y);
 export const glowMaterial=(color,intensity=2)=>new THREE.MeshStandardMaterial({color:'#20262a',emissive:new THREE.Color(color),emissiveIntensity:intensity,roughness:.3,metalness:.2});
 
 // ————— Lighthouse —————
-const BEAM_VERTEX=`varying float vAlong;varying vec3 vN,vView;uniform float uLength;
-void main(){vAlong=clamp(position.x/uLength,0.,1.);vec4 wp=modelMatrix*vec4(position,1.);vView=normalize(cameraPosition-wp.xyz);vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*viewMatrix*wp;}`;
-const BEAM_FRAGMENT=`varying float vAlong;varying vec3 vN,vView;uniform vec3 uColor;uniform float uIntensity,uTime;
+const BEAM_VERTEX=`varying float vAlong;varying vec3 vN,vView,vWorld;uniform float uLength;
+void main(){vAlong=clamp(position.x/uLength,0.,1.);vec4 wp=modelMatrix*vec4(position,1.);vWorld=wp.xyz;vView=normalize(cameraPosition-wp.xyz);vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*viewMatrix*wp;}`;
+// The beam is lit air: haze drifting on the wind, dust motes and, in rain, falling streaks that catch the light. Fog and rain make it brighter.
+const BEAM_FRAGMENT=`varying float vAlong;varying vec3 vN,vView,vWorld;uniform vec3 uColor;uniform float uIntensity,uTime,uHaze,uRain;uniform vec2 uWind;
+float bh(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
+float bn(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+  return mix(mix(mix(bh(i),bh(i+vec3(1,0,0)),f.x),mix(bh(i+vec3(0,1,0)),bh(i+vec3(1,1,0)),f.x),f.y),mix(mix(bh(i+vec3(0,0,1)),bh(i+vec3(1,0,1)),f.x),mix(bh(i+vec3(0,1,1)),bh(i+vec3(1,1,1)),f.x),f.y),f.z);}
 void main(){float edge=pow(abs(dot(normalize(vN),normalize(vView))),2.4);float fall=pow(1.-vAlong,2.2)*smoothstep(0.,.12,vAlong);
-float dust=.82+.18*sin(vAlong*37.-uTime*1.7)*sin(vAlong*13.+uTime*.9);gl_FragColor=vec4(uColor*edge*fall*dust*uIntensity,1.);
+vec3 drift=vec3(uWind.x,0.,uWind.y)*uTime*.35;
+float haze=.55+.55*bn(vWorld*1.3-drift)+.3*bn(vWorld*3.7-drift*1.6);
+float motes=pow(bn(vWorld*16.-drift*2.+vec3(0.,uTime*.25,0.)),9.)*5.*(1.-uRain*.7);
+float rain=pow(bn(vec3(vWorld.x*22.+vWorld.y*uWind.x*1.5,vWorld.y*1.4+uTime*11.,vWorld.z*22.+vWorld.y*uWind.y*1.5)),7.)*7.*uRain;
+float scatter=(.8+.45*uHaze+.35*uRain)*haze+motes+rain;
+gl_FragColor=vec4(uColor*edge*fall*scatter*uIntensity,1.);
 #include <tonemapping_fragment>
 #include <colorspace_fragment>
 }`;
 export function beamMaterial(color='#ffe3a6') {
-  return new THREE.ShaderMaterial({uniforms:{uColor:{value:new THREE.Color(color)},uIntensity:{value:1},uTime:{value:0},uLength:{value:1}},vertexShader:BEAM_VERTEX,fragmentShader:BEAM_FRAGMENT,
-    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,fog:false});
+  return new THREE.ShaderMaterial({uniforms:{uColor:{value:new THREE.Color(color)},uIntensity:{value:1},uTime:{value:0},uLength:{value:1},uHaze:{value:0},uRain:{value:0},uWind:{value:new THREE.Vector2(1,.4)}},
+    vertexShader:BEAM_VERTEX,fragmentShader:BEAM_FRAGMENT,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,fog:false});
 }
 export function beamGeometry(radius,length,segments=28) {
   const g=new THREE.ConeGeometry(radius,length,segments,8,true);g.translate(0,-length/2,0);g.rotateZ(Math.PI/2);return g;
@@ -114,14 +138,22 @@ export function buildLighthouse(mats) {
 }
 
 // ————— Pads —————
+// A low chamfered concrete footing. Empty pads also carry four surveyor's stakes, pulled up once something is built there.
 export function buildPads(pads,mats,place) {
-  const slabGeo=merge([part(new THREE.CylinderGeometry(.44,.48,.11,8),'#9a9c8d',{p:[0,.055,0]}),part(new THREE.CylinderGeometry(.36,.36,.012,8),'#8a8c7e',{p:[0,.114,0]})]);
-  const rimGeo=merge([part(new THREE.TorusGeometry(.405,.018,4,8),'#56625c',{p:[0,.108,0],r:[Math.PI/2,0,TAU/16]}),
-    ...[0,1,2,3].map(i=>part(new THREE.CylinderGeometry(.025,.025,.04,6),'#46514b',{p:[Math.cos(i*TAU/4+TAU/8)*.33,.12,Math.sin(i*TAU/4+TAU/8)*.33]}))]);
-  const slabs=new THREE.InstancedMesh(slabGeo,mats.stone,pads.length),rims=new THREE.InstancedMesh(rimGeo,mats.metal,pads.length);
-  pads.forEach((pad,i)=>{const w=place(pad);_m.makeTranslation(w.x,w.y,w.z);slabs.setMatrixAt(i,_m);rims.setMatrixAt(i,_m);});
-  slabs.receiveShadow=rims.receiveShadow=true;slabs.castShadow=true;
-  return [slabs,rims];
+  const slabGeo=merge([part(new THREE.CylinderGeometry(.4,.5,.11,16),'#9c998e',{p:[0,.055,0]}),part(new THREE.CylinderGeometry(.33,.33,.008,16),'#8b8a80',{p:[0,.112,0]}),
+    ...[0,1,2,3].map(i=>part(new THREE.CylinderGeometry(.018,.018,.03,6),'#5b5f5a',{p:[Math.cos(i*TAU/4+TAU/8)*.27,.12,Math.sin(i*TAU/4+TAU/8)*.27]}))]);
+  const stakeGeo=merge([part(new THREE.BoxGeometry(.02,.17,.02),'#7a5f40',{p:[0,.085,0]}),part(new THREE.BoxGeometry(.026,.03,.026),'#d4602e',{p:[0,.165,0]})]);
+  const slabs=new THREE.InstancedMesh(slabGeo,mats.stone,pads.length),stakes=new THREE.InstancedMesh(stakeGeo,mats.wood,pads.length*4);
+  const spots=pads.map((pad,i)=>{const w=place(pad);_m.makeTranslation(w.x,w.y,w.z);slabs.setMatrixAt(i,_m);return w;});
+  slabs.receiveShadow=true;slabs.castShadow=true;stakes.castShadow=true;
+  const setOccupied=occupied=>{
+    pads.forEach((pad,i)=>{const w=spots[i],on=!occupied.has(pad.id);
+      for(let k=0;k<4;k++){const a=k*TAU/4+TAU/8+.35;_m.compose(_p.set(w.x+Math.cos(a)*.5,w.y-.03,w.z+Math.sin(a)*.5),_q.setFromEuler(_e.set(.08*Math.sin(k*2.1+i),0,.08*Math.cos(k*1.7+i))),_s.setScalar(on?1:0));stakes.setMatrixAt(i*4+k,_m);}
+    });
+    stakes.instanceMatrix.needsUpdate=true;
+  };
+  setOccupied(new Set());
+  return {meshes:[slabs,stakes],setOccupied};
 }
 
 // ————— Towers —————
@@ -230,13 +262,19 @@ export function buildTower(type,level,mats,{ghost=false,color='#ffffff'}={}) {
 // Bodies are baked per kind; legs are drawn with shared instanced segments posed by two-bone IK each frame.
 export const CREATURES={
   crawler:{bodyY:.13,scale:1.35,legs:{hips:[[.09,.1],[0,.115],[-.09,.1]],upper:.15,lower:.17,reach:.2,stride:.22,lift:.06,radius:.02},eyes:[[.2,.15,.035],[.2,.15,-.035]],eye:'#ff5a3c',eyeSize:.022,hpY:.42,hpW:.34,leg:'#3f3a3a',
-    body:()=>[part(new THREE.SphereGeometry(.16,14,10),'#9a4f47',{p:[0,.14,0],s:[1.25,.48,1]}),part(new THREE.SphereGeometry(.15,12,8),'#5a3b37',{p:[0,.1,0],s:[1.2,.35,.95]}),
-      part(new THREE.BoxGeometry(.11,.07,.12),'#5b3a36',{p:[.19,.13,0]}),...[-.06,0,.06].map(x=>part(new THREE.BoxGeometry(.05,.025,.18),'#7b3c36',{p:[x,.205,0]})),
-      part(new THREE.ConeGeometry(.018,.07,5),'#3a2c2a',{p:[.26,.1,.03],r:[0,0,-1.9]}),part(new THREE.ConeGeometry(.018,.07,5),'#3a2c2a',{p:[.26,.1,-.03],r:[0,0,-1.9]})]},
+    body:()=>[part(new THREE.SphereGeometry(.15,12,8),'#5a3b37',{p:[0,.1,0],s:[1.2,.35,.95]}),
+      // Overlapping shell segments, largest mid-body, tapering to the tail.
+      ...[[.14,.12,'#9a4f47'],[.07,.14,'#8a463f'],[-.01,.145,'#9a4f47'],[-.09,.13,'#8a463f'],[-.16,.1,'#7e3f39']].map(([x,r,c])=>part(new THREE.SphereGeometry(r,14,6,0,TAU,0,Math.PI/2),c,{p:[x,.118,0],s:[.52,.66,1.08]})),
+      part(new THREE.BoxGeometry(.11,.07,.12),'#5b3a36',{p:[.19,.13,0]}),
+      part(new THREE.ConeGeometry(.018,.07,5),'#3a2c2a',{p:[.26,.1,.03],r:[0,0,-1.9]}),part(new THREE.ConeGeometry(.018,.07,5),'#3a2c2a',{p:[.26,.1,-.03],r:[0,0,-1.9]}),
+      ...[1,-1].flatMap(z=>[strut([.23,.15,.03*z],[.31,.23,.08*z],.007,'#3a2c2a',true),strut([.31,.23,.08*z],[.41,.22,.15*z],.005,'#3a2c2a',true)])]},
   runner:{bodyY:.17,scale:1.35,legs:{hips:[[.08,.08],[-.1,.08]],upper:.2,lower:.23,reach:.16,stride:.34,lift:.09,radius:.017},eyes:[[.25,.19,0]],eye:'#ffc34a',eyeSize:.03,eyeScale:[.6,.55,2.4],hpY:.46,hpW:.32,leg:'#40392e',
     body:()=>[part(new THREE.SphereGeometry(.14,14,10),'#c8954f',{p:[0,.18,0],s:[1.9,.5,.72]}),part(new THREE.SphereGeometry(.12,12,8),'#4a3c2c',{p:[0,.14,0],s:[1.7,.35,.6]}),
       part(new THREE.ConeGeometry(.06,.16,6),'#b88542',{p:[.3,.17,0],r:[0,0,-Math.PI/2]}),part(new THREE.BoxGeometry(.2,.02,.07),'#8c6630',{p:[-.3,.23,0],r:[0,0,.35]}),
-      part(new THREE.BoxGeometry(.14,.05,.02),'#8c6630',{p:[-.05,.25,0]})]},
+      part(new THREE.BoxGeometry(.14,.05,.02),'#8c6630',{p:[-.05,.25,0]}),
+      ...[[.12,.07],[.02,.08],[-.09,.075],[-.19,.06]].map(([x,r])=>part(new THREE.SphereGeometry(r,12,5,0,TAU,0,Math.PI/2),'#b27f40',{p:[x,.19,0],s:[.9,.55,1]})),
+      // Long feelers swept back over the shell, and a pair of tail cerci.
+      ...[1,-1].flatMap(z=>[strut([.34,.2,.022*z],[.33,.32,.07*z],.006,'#40392e',true),strut([.33,.32,.07*z],[.14,.4,.13*z],.0045,'#40392e',true),strut([-.27,.19,.02*z],[-.42,.25,.07*z],.005,'#40392e',true)])]},
   tank:{bodyY:.2,scale:1.3,legs:{hips:[[.15,.19],[0,.21],[-.15,.19]],upper:.22,lower:.25,reach:.26,stride:.2,lift:.05,radius:.03},eyes:[[.27,.34,.07],[.27,.34,-.07]],eye:'#c99bff',eyeSize:.028,hpY:.66,hpW:.56,leg:'#403a48',
     claws:{arm:[.3,.16,.18],size:.13},
     body:()=>[part(new THREE.SphereGeometry(.3,18,12,0,TAU,0,Math.PI/2),'#8a7a9b',{p:[0,.17,0],s:[1.12,.62,1]}),part(new THREE.CylinderGeometry(.32,.3,.1,18),'#4d4556',{p:[0,.14,0],s:[1.12,1,1]}),
@@ -262,16 +300,70 @@ export function clawGeometry() {
 }
 
 // ————— Scenery —————
+// Trees: pines built from tiers of drooping, star-edged branch skirts; broadleaf crowns from lumpy clusters. Colours lighten towards the tips.
+function tier(radius,height,y,seed,dark,light) {
+  const segs=11,g=new THREE.ConeGeometry(radius,height,segs,3,true),pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color();
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),py=pos.getY(i),z=pos.getZ(i),r=Math.hypot(x,z),a=Math.atan2(z,x),t=r/radius;
+    const k=Math.round((a+seed)/(TAU/segs)),star=1+(k%2?.2:-.14)*t;
+    pos.setXYZ(i,x*star,py-t*t*height*.28+y,z*star);
+    c.set(dark).lerp(new THREE.Color(light),Math.min(1,t*1.1));col.set([c.r,c.g,c.b],i*3);
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();g.rotateY(seed);return g;
+}
+function lump(radius,seed,dark,light,p) {
+  const g=new THREE.IcosahedronGeometry(radius,2),pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color();
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),n=1+.16*Math.sin(x*11+seed)*Math.sin(z*9-seed)+.1*Math.sin(y*13+seed*2);
+    pos.setXYZ(i,x*n+p[0],y*n*.86+p[1],z*n+p[2]);
+    c.set(dark).lerp(new THREE.Color(light),Math.max(0,Math.min(1,.5+y/radius*.6)));col.set([c.r,c.g,c.b],i*3);
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();return g;
+}
 export function treeGeometries() {
-  const pine=merge([part(new THREE.CylinderGeometry(.035,.05,.4,6),'#5b4632',{p:[0,.2,0]}),part(new THREE.ConeGeometry(.3,.46,8),'#2f5a3e',{p:[0,.48,0]}),part(new THREE.ConeGeometry(.24,.4,8),'#376646',{p:[0,.72,0]}),part(new THREE.ConeGeometry(.16,.34,8),'#40714d',{p:[0,.94,0]})]);
-  const broad=merge([part(new THREE.CylinderGeometry(.04,.06,.46,6),'#5e4a36',{p:[0,.23,0]}),part(new THREE.IcosahedronGeometry(.24,1),'#4f7a3d',{p:[0,.6,0],s:[1,.85,1]}),
-    part(new THREE.IcosahedronGeometry(.18,1),'#5e8746',{p:[.14,.72,.06]}),part(new THREE.IcosahedronGeometry(.17,1),'#46703a',{p:[-.12,.68,-.08]}),part(new THREE.IcosahedronGeometry(.14,1),'#6a9150',{p:[0,.84,0]})]);
+  const pine=merge([part(new THREE.CylinderGeometry(.022,.05,.62,6),'#4d3a28',{p:[0,.31,0]}),
+    ...[[.33,.3,.36,0],[.28,.28,.54,.9],[.23,.26,.71,1.9],[.17,.22,.86,2.6],[.11,.18,.99,3.7]].map(([r,h,y,seed])=>part(tier(r,h,y,seed,'#1f3b2a','#4f7a50'),null))]);
+  const broad=merge([part(new THREE.CylinderGeometry(.03,.06,.5,6),'#57452f',{p:[0,.25,0]}),strut([0,.36,0],[.14,.56,.05],.025,'#57452f',true),strut([0,.4,0],[-.12,.58,-.06],.022,'#57452f',true),
+    ...[[.21,[0,.66,0],1],[.17,[.15,.62,.07],2],[.16,[-.13,.63,-.07],3],[.15,[.02,.8,.05],4],[.12,[-.06,.74,.13],5],[.12,[.08,.72,-.12],6]].map(([r,p,seed])=>part(lump(r,seed,'#2f4f27','#6f9a4c',p),null))]);
   return {pine,broad};
 }
 export function rockGeometry(seed) {
-  const g=new THREE.IcosahedronGeometry(1,1),pos=g.attributes.position;
-  for(let i=0;i<pos.count;i++){const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),n=1+.28*Math.sin(x*3.1+seed)*Math.cos(z*2.7-seed)+.12*Math.sin(y*5.3+seed*2);pos.setXYZ(i,x*n,y*n*.62,z*n);}
-  g.computeVertexNormals();return merge([part(g,'#8d887c')]);
+  // A boulder: layered noise pushes a smooth sphere into lumps and ledges. Crevices darken, tops pick up lichen and moss.
+  const g=new THREE.IcosahedronGeometry(1,3),pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color(),moss=new THREE.Color('#5b6b3e'),lichen=new THREE.Color('#a39f86');
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i);
+    const d=.22*Math.sin(x*2.3+seed)*Math.cos(z*2.1-seed)+.12*Math.sin(y*4.1+seed*2)*Math.cos(x*3.7)+.06*Math.sin((x+z)*7.3+seed)+.03*Math.sin((x-y)*13+seed);
+    const n=1+d;pos.setXYZ(i,x*n,y*n*.62,z*n);
+    const shade=.72+d*1.4;c.setRGB(.5*shade,.48*shade,.44*shade);
+    if(y>.35)c.lerp(y>.65?moss:lichen,Math.min(1,(y-.35)*1.6)*.55);
+    if(y<-.3)c.multiplyScalar(.75);col.set([c.r,c.g,c.b],i*3);
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();
+  const out=new THREE.BufferGeometry();out.setAttribute('position',g.attributes.position);out.setAttribute('normal',g.attributes.normal);out.setAttribute('color',g.attributes.color);out.setIndex(g.index);
+  return out;
+}
+export function islandGeometry(seed,{radius=8,height=4,depth=.7}={}) {
+  const g=new THREE.SphereGeometry(1,64,14,0,TAU,0,Math.PI/2),pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color(),forest=new THREE.Color('#26332c'),rock=new THREE.Color('#58605a'),shore=new THREE.Color('#6d6a5c');
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),a=Math.atan2(z,x);
+    const ridge=1+.38*Math.sin(a*2+seed)+.2*Math.sin(a*5+seed*2.3)+.1*Math.sin(a*11+seed*.7),r=radius*(1+.14*Math.sin(a*3+seed*1.7)+.06*Math.sin(a*9+seed));
+    const up=Math.pow(y,.75)*Math.max(.35,ridge);
+    pos.setXYZ(i,x*r,height*up-.8,z*r*depth);
+    c.copy(shore).lerp(forest,Math.min(1,y*9)).lerp(rock,Math.max(0,Math.min(1,(up-.62)*3)));col.set([c.r,c.g,c.b],i*3);
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();return g;
+}
+// A sea stack: a leaning, weathered column with rock layers, a dark wet foot and a little green on top.
+export function stackGeometry(seed) {
+  const g=new THREE.CylinderGeometry(.3,.62,2.2,11,14),pos=g.attributes.position,col=new Float32Array(pos.count*3),c=new THREE.Color(),top=new THREE.Color('#3b4e30');
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),a=Math.atan2(z,x),k=(y+1.1)/2.2;
+    const n=1+.22*Math.sin(a*3+seed+y*2.1)+.12*Math.sin(a*7-seed*1.3+y*4.7)+.08*Math.sin(y*9+seed)-.1*Math.max(0,k-.8)*5;
+    pos.setXYZ(i,x*n+k*k*.35*Math.cos(seed),y+1.1,z*n+k*k*.35*Math.sin(seed));
+    const band=.5+.5*Math.sin(y*11+Math.sin(a*2+seed)*1.6);c.setRGB(.24+.13*band,.23+.12*band,.22+.1*band);
+    if(k>.96)c.lerp(top,.9);if(k<.18)c.multiplyScalar(.55+.45*k/.18);col.set([c.r,c.g,c.b],i*3);
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();return g;
 }
 export function grassGeometry() {
   const blades=[];

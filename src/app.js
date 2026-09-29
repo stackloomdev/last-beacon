@@ -515,13 +515,15 @@ function renderResult(){
 }
 // The result waits a moment so the victory or defeat shot can play first.
 function showResult(delay=0){persistBest();renderResult();setTimeout(()=>{if(['won','lost'].includes(game.phase)&&!$('result-dialog').open)$('result-dialog').showModal();},delay);}
-function panOf(e){
-  if(!Number.isFinite(e.x)||!renderer.w)return 0;
-  return Math.max(-1,Math.min(1,renderer.p(e.x,e.y,0).x/renderer.w*2-1))*.8;
+// Where a sound comes from: its place on screen sets the stereo position, and the 3D view also fades it with distance.
+function hear(e){
+  if(!Number.isFinite(e.x)||!renderer.w)return {pan:0,level:1};
+  if(renderer.hear)return renderer.hear(e.x,e.y);
+  return {pan:Math.max(-1,Math.min(1,renderer.p(e.x,e.y,0).x/renderer.w*2-1))*.8,level:1};
 }
 function handleEvents(){
   for(const e of game.events){
-    audio.play(e.type,{kind:e.kind,enemyType:e.enemyType,pan:panOf(e)});
+    audio.play(e.type,{kind:e.kind,enemyType:e.enemyType,by:e.by,...hear(e)});
     renderer.onEvent(e);
     if(e.type==='wave'){const endless=e.wave>10,night=isNightWave(e.wave);banner(endless?'wave.endless':`wave.${e.wave}`,night?(endless?'banner.waveEndlessNight':'banner.waveNight'):endless?'banner.waveEndless':'banner.wave',{wave:String(e.wave).padStart(2,'0')},night);}
     if(e.type==='clear'){toast('toast.clear',{wave:game.wave,reward:e.reward});persistBest();cancelAim();}

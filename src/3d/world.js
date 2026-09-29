@@ -3,7 +3,7 @@ import {PADS,SOURCE,TYPES,PATH,PATH_LENGTH,pathPosition,towerStats,STRIKE,BEAM,D
 import {HeightField,createTerrain,scatter,PAD_Y,PAD_TOP,LIGHTHOUSE_Y,COTTAGE,PIER,MAX_DECALS,MAX_LAMPS,ROAD_Y,mulberry} from './terrain.js';
 import {createWater} from './water.js';
 import {Atmosphere,moodFor} from './sky.js';
-import {createMaterials,buildLighthouse,buildPads,buildTower,CREATURES,clawGeometry,treeGeometries,rockGeometry,grassGeometry,buildCottage,buildPier,buildBoat,buildBuoy,birdGeometry,merge,part} from './models.js';
+import {createMaterials,buildLighthouse,buildPads,buildTower,CREATURES,clawGeometry,treeGeometries,rockGeometry,grassGeometry,islandGeometry,stackGeometry,buildCottage,buildPier,buildBoat,buildBuoy,birdGeometry,merge,part} from './models.js';
 import {Particles,Debris,Ribbons,Rings,createRain,Labels,atlasTexture,SPRITE} from './effects.js';
 import {CameraRig} from './camera.js';
 import {Bloom} from './post.js';
@@ -17,6 +17,7 @@ export const QUALITY={
 const rgb=(c,k=1)=>{const x=new THREE.Color(c);return [x.r*k,x.g*k,x.b*k];};
 const FIRE=[rgb('#ffd27a',3.2),rgb('#ff7a2a',1.4)],SMOKE=[rgb('#6d6a66'),rgb('#3a3a3a')],DUST=[rgb('#b09a78'),rgb('#8a7a64')];
 const easeBack=t=>{const c=1.9;return 1+(c+1)*(t-1)**3+c*(t-1)**2;};
+const _knee=new THREE.Vector3(),_perp=new THREE.Vector3(),_size=new THREE.Vector3(),_axis=new THREE.Vector3(),_euler=new THREE.Euler(),_jaw=new THREE.Matrix4(),_q3=new THREE.Quaternion(),_t1=new THREE.Color(),_t2=new THREE.Color(),_t3=new THREE.Color();
 const _v=new THREE.Vector3(),_v2=new THREE.Vector3(),_v3=new THREE.Vector3(),_m=new THREE.Matrix4(),_m2=new THREE.Matrix4(),_q=new THREE.Quaternion(),_q2=new THREE.Quaternion(),_s=new THREE.Vector3(),_c=new THREE.Color(),_c2=new THREE.Color(),_up=new THREE.Vector3(0,1,0),_ray=new THREE.Raycaster(),_ndc=new THREE.Vector2();
 
 function warningTexture(color) {
@@ -43,7 +44,7 @@ export class World3D {
     this.atmo.onLightning=strength=>this.lightning(strength);
     this.terrain=createTerrain(this.field,quality);this.scene.add(this.terrain.mesh);
     this.heightTexture=this.field.texture();this.water=createWater(this.heightTexture,quality);this.scene.add(this.water.mesh);
-    this.mats=createMaterials();
+    const tu=this.terrain.uniforms;this.mats=createMaterials({decals:{uDecals:tu.uDecals,uDecalCount:tu.uDecalCount}});
     this.atlas=atlasTexture();this.halo=haloTexture();
     this.additive=new Particles(q.additive,this.atlas,true);this.smoke=new Particles(q.alpha,this.atlas,false);
     this.debris=new Debris(q.debris,q.shadow>0);this.ribbons=new Ribbons();this.rings=new Rings(this.atlas);this.labels=new Labels();
@@ -52,7 +53,7 @@ export class World3D {
     this.flashes=Array.from({length:q.flashes},()=>{const l=new THREE.PointLight('#ffffff',0,5,2);this.scene.add(l);return {light:l,t:0,life:1,peak:0};});
     this.decals=[];this.decalIndex=0;this.later=[];
     this.buildLighthouse();this.buildPads();this.buildCreatures();this.buildScenery();this.buildPreview();
-    this.towers=new Map();this.dying=[];this.enemyViews=new Map();this.shellViews=new WeakMap();this.cables=new Map();this.networkKey='';this.ghosts={};
+    this.towers=new Map();this.dying=[];this.remains=[];this.enemyViews=new Map();this.shellViews=new WeakMap();this.cables=new Map();this.networkKey='';this.ghosts={};
     this.warnings={disconnected:new THREE.SpriteMaterial({map:warningTexture('#c9674f'),depthWrite:false}),overload:new THREE.SpriteMaterial({map:warningTexture('#c99a4f'),depthWrite:false})};
     this.shells=new THREE.InstancedMesh(new THREE.SphereGeometry(.06,10,8),new THREE.MeshStandardMaterial({color:'#2e2c28',roughness:.5,metalness:.6}),40);
     this.shells.frustumCulled=false;this.shells.castShadow=q.shadow>0;this.shells.count=0;this.scene.add(this.shells);
@@ -83,7 +84,7 @@ export class World3D {
   setGame(game) {
     this.game=game;this.rig.reset();this.beamDown=0;
     for(const view of this.towers.values())this.removeTowerView(view);
-    this.towers.clear();this.enemyViews.clear();this.particles=[];this.strike=null;this.aim=null;this.decals.length=0;this.later.length=0;this.networkKey='';this.fireworks=0;
+    this.towers.clear();this.enemyViews.clear();this.remains=[];this.particles=[];this.strike=null;this.aim=null;this.decals.length=0;this.later.length=0;this.networkKey='';this.fireworks=0;
     for(const c of this.cables.values()){this.scene.remove(c.mesh);c.mesh.geometry.dispose();}this.cables.clear();
     this.atmo.setMood(moodFor(game),true);this.lostT=0;this.hurt=0;
   }
@@ -101,7 +102,7 @@ export class World3D {
     const lh=this.lighthouse=buildLighthouse(this.mats),base=this.at(SOURCE.x,SOURCE.y);
     lh.group.position.set(base.x,LIGHTHOUSE_Y,base.z);this.scene.add(lh.group);
     const rocks=[],rand=mulberry(99);
-    for(let i=0;i<9;i++){const a=i/9*TAU+rand()*.5,d=.78+rand()*.25;rocks.push(part(rockGeometry(i*3.1),'#8b877c',{p:[Math.cos(a)*d,.08,Math.sin(a)*d],s:[.16+rand()*.12,.14+rand()*.1,.16+rand()*.12],r:[0,rand()*6,0]}));}
+    for(let i=0;i<9;i++){const a=i/9*TAU+rand()*.5,d=.78+rand()*.25;rocks.push(part(rockGeometry(i*3.1),null,{p:[Math.cos(a)*d,.08,Math.sin(a)*d],s:[.16+rand()*.12,.14+rand()*.1,.16+rand()*.12],r:[0,rand()*6,0]}));}
     const rockMesh=new THREE.Mesh(merge(rocks),this.mats.rock);rockMesh.castShadow=rockMesh.receiveShadow=true;lh.group.add(rockMesh);
     this.lamp=new THREE.PointLight('#ffcf85',3,11,2);this.lamp.position.set(base.x,LIGHTHOUSE_Y+lh.lampY+.05,base.z);this.scene.add(this.lamp);
     this.beamLight=new THREE.SpotLight('#ffe2a8',0,42,.13,.6,1.1);this.beamLight.position.copy(this.lamp.position);
@@ -112,7 +113,8 @@ export class World3D {
     this.beamYaw=0;this.beamTilt=.07;this.beamDown=0;this.beamReach=12;this.lampLevel=0;
   }
   buildPads() {
-    for(const m of buildPads(PADS,this.mats,p=>this.at(p.x,p.y,0,new THREE.Vector3()).setY(PAD_Y)))this.scene.add(m);
+    this.pads=buildPads(PADS,this.mats,p=>this.at(p.x,p.y,0,new THREE.Vector3()).setY(PAD_Y));this.occupiedKey='';
+    for(const m of this.pads.meshes)this.scene.add(m);
     const ring=new THREE.RingGeometry(.4,.47,48);ring.rotateX(-Math.PI/2);this.ringGeo=ring;
     this.padMarkers=PADS.map(p=>{const m=new THREE.Mesh(ring,new THREE.MeshBasicMaterial({color:'#f1d697',transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:0}));m.position.copy(this.at(p.x,p.y)).setY(PAD_TOP+.012);m.renderOrder=4;this.scene.add(m);return m;});
   }
@@ -126,6 +128,8 @@ export class World3D {
     this.legs=inst(new THREE.CylinderGeometry(.62,1,1,6),new THREE.MeshStandardMaterial({roughness:.45,metalness:.65}),2600,true);
     this.eyes=inst(new THREE.SphereGeometry(1,10,8),new THREE.MeshBasicMaterial({color:'#ffffff'}),700,false);
     const claw=clawGeometry();this.clawArms=inst(claw.arm,this.mats.creature,64,true);this.clawJaws=inst(claw.jaw,this.mats.creature,64,true);
+    // Frost kills are encased in a glassy shell of ice until they shatter.
+    this.ice=inst(new THREE.IcosahedronGeometry(1,1),new THREE.MeshStandardMaterial({color:'#dff6ff',roughness:.06,metalness:.1,transparent:true,opacity:.42,depthWrite:false,flatShading:true,emissive:new THREE.Color('#5d93a8'),emissiveIntensity:.3}),40,false);this.ice.renderOrder=3;this.ice.instanceColor=null;
     const bar=new THREE.PlaneGeometry(1,1);
     this.hpBack=inst(bar,new THREE.MeshBasicMaterial({color:'#ffffff',transparent:true,opacity:.75,depthWrite:false}),240,false);
     this.hpFill=inst(bar,new THREE.MeshBasicMaterial({color:'#ffffff',depthWrite:false,transparent:true}),240,false);
@@ -144,7 +148,7 @@ export class World3D {
     const rockGeo=rockGeometry(1.7);
     inst(rockGeo,mats.rock,rocks,(r,m)=>m.compose(_v.set(r.x-6.5,r.h-r.scale*.15,r.y-5.5),_q.setFromEuler(new THREE.Euler(r.tilt,r.rot,r.tilt*.5)),_s.set(r.scale*1.2,r.scale,r.scale)),true,false);
     const blades=grass.slice(0,Math.round(grass.length*q.grass));
-    inst(grassGeometry(),mats.foliage,blades,(g,m)=>m.compose(_v.set(g.x-6.5,g.h-.01,g.y-5.5),_q.setFromAxisAngle(_up,g.rot),_s.setScalar(g.scale)),false);
+    inst(grassGeometry(),mats.grass,blades,(g,m)=>m.compose(_v.set(g.x-6.5,g.h-.01,g.y-5.5),_q.setFromAxisAngle(_up,g.rot),_s.setScalar(g.scale)),false);
     const flowerMesh=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.022,0),new THREE.MeshStandardMaterial({roughness:.7}),Math.max(1,flowers.length));
     const petals=['#f4f1e4','#f2d16b','#d98fb0','#b9a3e3'];
     flowers.forEach((f,i)=>{_m.makeTranslation(f.x-6.5,f.h+.06,f.y-5.5);flowerMesh.setMatrixAt(i,_m);flowerMesh.setColorAt(i,_c.set(petals[Math.floor(f.color*petals.length)]));});
@@ -160,8 +164,15 @@ export class World3D {
       const light=new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),new THREE.MeshBasicMaterial({color:color==='#b44e3b'?'#ff6a4a':'#6aff9a'}));light.position.y=.4;m.add(light);
       return {mesh:m,light,phase:i*1.7,base:m.position.clone()};
     });
-    const stack=rockGeometry(4.2);
-    for(const [x,z,s] of [[-38,-30,5],[-52,6,7],[30,-44,6],[46,-10,4],[-18,-60,8]]){const m=new THREE.Mesh(stack,mats.rock);m.position.set(x,-.5,z);m.scale.set(s*.8,s*1.4,s*.7);m.rotation.y=x;this.scene.add(m);}
+    // Distant islands close the horizon; one keeps its own small light burning at night.
+    const far=[[-44,-34,9,5,1.1,1],[-66,8,13,6,.8,2],[34,-52,11,4.5,.7,3],[58,-14,7,3.2,1.4,4]];
+    for(const [x,z,radius,height,rot,seed] of far){const m=new THREE.Mesh(islandGeometry(seed,{radius,height}),mats.stone);m.position.set(x,0,z);m.rotation.y=rot;m.receiveShadow=false;this.scene.add(m);}
+    this.farLight=new THREE.Mesh(new THREE.SphereGeometry(.18,8,6),new THREE.MeshBasicMaterial({color:'#ffe2a8'}));this.farLight.position.set(-44+5.5,3.1,-34+2);this.scene.add(this.farLight);
+    const tower=new THREE.Mesh(new THREE.CylinderGeometry(.14,.2,1.3,8),new THREE.MeshStandardMaterial({color:'#d9d2bd',roughness:.8}));tower.position.set(-44+5.5,2.3,-34+2);this.scene.add(tower);
+    // Sea stacks stand off the northern cliffs.
+    for(const [x,y,s,seed] of [[3.4,-2.4,.8,1],[9.4,-2.7,.62,2],[-2,.8,.5,3]]){
+      const p=this.at(x,y);const m=new THREE.Mesh(stackGeometry(seed),mats.stone);m.position.set(p.x,-.4,p.z);m.scale.set(s,s*(.85+seed*.1),s);m.rotation.y=seed*1.7;m.castShadow=m.receiveShadow=q.shadow>0;this.scene.add(m);
+    }
     const bird=birdGeometry();this.birds=[];
     for(let i=0;i<7;i++){
       const g=new THREE.Group(),body=new THREE.Mesh(bird.body,mats.paint),l=new THREE.Mesh(bird.wing,mats.paint),rw=new THREE.Mesh(bird.wing,mats.paint);
@@ -216,7 +227,14 @@ export class World3D {
     return {x:(_v.x+1)/2*this.w,y:(1-_v.y)/2*this.h,behind:_v.z>1};
   }
   consumeClick(){return this.rig.consumeClick();}
-  ambience(){const s=this.atmo.state;return {rain:s.rain,storm:s.storm,wind:s.wind,waves:s.waves,night:clamp(1-s.keyI/2.4,0,1)};}
+  // coast is how close the camera sits to the water: zoomed in and low over the island, the surf gets louder.
+  ambience(){const s=this.atmo.state,r=this.rig,coast=clamp(.55*(1.45-r.zoom)/1.03+.45*(1-(r.elevation-.21)/1.19),0,1);return {rain:s.rain,storm:s.storm,wind:s.wind,waves:s.waves,night:clamp(1-s.keyI/2.4,0,1),coast};}
+  // A sound's stereo position comes from where it is on screen; its level falls off with distance from the camera and off-screen.
+  hear(x,y) {
+    const p=this.at(x,y,.2,_v3),d=p.distanceTo(this.camera.position),ref=this.camera.position.distanceTo(this.rig.target)||1;
+    p.project(this.camera);const off=Math.max(0,Math.abs(p.x)-1,Math.abs(p.y)-1);
+    return {pan:clamp(p.x,-1,1)*.8,level:clamp((ref/Math.max(d,.1))**.8,.35,1.25)*(1-Math.min(.6,off*.7))};
+  }
 
   // ————— Effects —————
   flash(pos,color,intensity=8,life=.18,distance=5) {
@@ -228,8 +246,13 @@ export class World3D {
     const p=this.at(x,y,.25);
     for(let i=0;i<count;i++){const a=Math.random()*TAU,s=.6+Math.random()*1.4;this.additive.spawn({x:p.x,y:p.y,z:p.z,vx:Math.cos(a)*s,vy:1+Math.random()*2,vz:Math.sin(a)*s,life:.5+Math.random()*.4,size:.05,color:rgb(color,2.2),gravity:3.5,sprite:SPRITE.glow});}
   }
+  // Scorch marks last until the wave is over. A fresh blast on an old mark deepens it rather than taking another slot.
   scorch(X,Z,radius,strength=1) {
-    this.decals[this.decalIndex]={x:X,z:Z,r:radius,s:strength,age:0};this.decalIndex=(this.decalIndex+1)%MAX_DECALS;
+    const near=this.decals.find(d=>d&&Math.hypot(d.x-X,d.z-Z)<Math.max(d.r,radius)*.45);
+    if(near){near.r=Math.min(Math.max(near.r,radius)*1.06,2.4);near.s=Math.min(1,Math.max(near.s,strength)+.08);near.age=0;near.clear=0;return;}
+    let i=-1;for(let k=0;k<MAX_DECALS;k++)if(!this.decals[k]){i=k;break;}
+    if(i<0){i=this.decalIndex;this.decalIndex=(this.decalIndex+1)%MAX_DECALS;}
+    this.decals[i]={x:X,z:Z,r:radius,s:strength,age:0,clear:0};
   }
   explosion(pos,{size=1,debris='#5a5652',smoke=true,fire=true,ring=true,scorch=true,shake=0,light=true}={}) {
     const A=this.additive,S=this.smoke;
@@ -256,6 +279,15 @@ export class World3D {
   }
   towerView(id){return this.towers.get(id);}
   muzzle(view,index=0,out=new THREE.Vector3()){const m=view.model.muzzles[index%Math.max(1,view.model.muzzles.length)]||view.model.emitter;return m.getWorldPosition(out);}
+  // Hit reactions: a shot shoves a creature back along its line and tips it away; a blast throws everything nearby off its feet.
+  recoil(id,dx,dy,amount,hop=0) {
+    const v=this.enemyViews.get(id);if(!v)return;const l=Math.hypot(dx,dy);
+    if(l>1e-4){v.fx=dx/l;v.fz=dy/l;}else{const a=Math.random()*TAU;v.fx=Math.cos(a);v.fz=Math.sin(a);}
+    v.flinch=Math.min(1,v.flinch+amount);if(hop>0){v.hopH=Math.max(v.hop>0?v.hopH:0,.26*hop);v.hop=1;}
+  }
+  shove(x,y,radius) {
+    for(const en of this.game.enemies){const d=Math.hypot(en.x-x,en.y-y);if(d<=radius)this.recoil(en.id,en.x-x,en.y-y,1,en.type==='boss'?0:1-d/radius*.5);}
+  }
   onEvent(e) {
     const g=this.game;
     if(e.type==='shoot') {
@@ -291,15 +323,21 @@ export class World3D {
       const color=kind==='frost'?rgb('#b8fff7',2.4):kind==='arc'?rgb('#d6c8ff',3):rgb('#ffd27a',3);
       for(let i=0;i<(kind==='frost'?7:5);i++){const a=Math.random()*TAU,s=.6+Math.random()*1.3;this.additive.spawn({x:p.x,y:p.y,z:p.z,vx:Math.cos(a)*s,vy:.4+Math.random()*1.4,vz:Math.sin(a)*s,life:.2+Math.random()*.25,size:.02,stretch:kind==='frost'?0:.035,color,gravity:4,sprite:kind==='frost'?SPRITE.star:SPRITE.glow,spin:4});}
       if(kind==='frost')this.smoke.spawn({x:p.x,y:p.y,z:p.z,vy:.15,life:.8,size:.18,grow:.3,color:rgb('#dffaff'),alpha:.35,sprite:SPRITE.smoke});
+      this.recoil(e.id,e.x-(e.fromX??e.x),e.y-(e.fromY??e.y),kind==='arc'?.85:kind==='frost'?.45:.65);
     } else if(e.type==='blast') {
-      this.explosion(this.at(e.x,e.y),{size:1,debris:'#6d5a44',shake:.1});
+      this.explosion(this.at(e.x,e.y),{size:1,debris:'#6d5a44',shake:.1});this.shove(e.x,e.y,(e.radius??1.15)*1.15);
     } else if(e.type==='kill') {
       const p=this.at(e.x,e.y,.05),def=CREATURES[e.enemyType],boss=e.enemyType==='boss',big=boss?2.4:e.enemyType==='tank'?1.25:e.enemyType==='splitter'?.9:e.enemyType==='spawn'?.45:.7;
       if(e.enemyType==='splitter'||e.enemyType==='spawn') {
         for(let i=0;i<14*big;i++){const a=Math.random()*TAU,s=.5+Math.random()*1.5;this.smoke.spawn({x:p.x,y:p.y+.15,z:p.z,vx:Math.cos(a)*s,vy:1+Math.random()*2,vz:Math.sin(a)*s,life:.7,size:.05,grow:.1,color:rgb('#9fd86a'),alpha:.9,gravity:5,sprite:SPRITE.glow,ground:true});}
         this.additive.spawn({x:p.x,y:p.y+.2,z:p.z,life:.25,size:.6*big,color:rgb('#c9ff8a',2),sprite:SPRITE.glow});
         this.debris.spawn(p.x,p.y+.1,p.z,'#4f6b3e',Math.round(4*big),.8,.03);
-      } else this.explosion(p,{size:big,debris:e.color||'#6a5a58',shake:boss?.9:big>1?.12:0,scorch:big>1});
+      } else if(boss) this.explosion(p,{size:big,debris:e.color||'#6a5a58',shake:.9,scorch:true});
+      else {
+        // Ordinary creatures leave remains that show what killed them; a tank still lands with a thud.
+        this.addRemains(e);
+        if(e.enemyType==='tank'){this.rig.shake(.08);this.rings.add(p.x,Math.max(p.y,0)+.02,p.z,{from:.2,to:.9,life:.45,color:'#b09a78',intensity:.5});}
+      }
       if(boss)for(let i=1;i<=4;i++)this.later.push({t:i*.22,run:()=>this.explosion(this.at(e.x+(Math.random()-.5)*1.4,e.y+(Math.random()-.5)*1.4),{size:1.3,debris:'#5b3b36',shake:.3})});
       this.labels.add(`+${e.reward??0}`,p.x,p.y+(def?.hpY||.4)+.1,p.z,'#f3dc9a',boss?.8:.36);
     } else if(e.type==='split') {
@@ -323,7 +361,7 @@ export class World3D {
       this.explosion(p,{size:2.2,debris:'#6a5a44',shake:.7});
       for(let i=0;i<40;i++){const a=Math.random()*TAU,r=Math.random()*STRIKE.radius;this.additive.spawn({x:p.x+Math.cos(a)*r,y:p.y+.05,z:p.z+Math.sin(a)*r,vy:.8+Math.random()*2.2,life:.8+Math.random()*.9,size:.03,stretch:.02,color:rgb('#ffcf7a',3),gravity:-.4,drag:1,sprite:SPRITE.glow});}
       this.rings.add(p.x,p.y+.04,p.z,{from:.2,to:STRIKE.radius*1.4,life:.7,color:'#ffe2a0',intensity:2.5});
-      this.scorch(p.x,p.z,STRIKE.radius*.95,1);this.flash(_v3.copy(p).setY(p.y+1),'#ffd9a0',30,.5,9);this.strike=null;
+      this.scorch(p.x,p.z,STRIKE.radius*.95,1);this.flash(_v3.copy(p).setY(p.y+1),'#ffd9a0',30,.5,9);this.strike=null;this.shove(e.x,e.y,STRIKE.radius*1.2);
     } else if(e.type==='beam') {
       const p=this.at(e.x,e.y);this.rings.add(p.x,Math.max(p.y,0)+.04,p.z,{from:.3,to:BEAM.radius,life:.55,color:'#ffe6b0',intensity:1.3});
     } else if(e.type==='boss') {
@@ -348,7 +386,7 @@ export class World3D {
   syncTowers(dt) {
     const g=this.game,alive=new Set(),od=g.overdrive>0,lamps=this.terrain.uniforms.uLamps.value;let lamp=0;
     for(const t of g.towers)if(t.type==='relay'&&t.powered&&lamp<MAX_LAMPS){const c=this.at(t.x,t.y);lamps[lamp++].set(c.x,c.z,DARK.lamp,this.lampLevel*.85);}
-    while(lamp<MAX_LAMPS)lamps[lamp++].set(0,0,1,0);
+    this.terrain.uniforms.uLampCount.value=lamp;while(lamp<MAX_LAMPS)lamps[lamp++].set(0,0,1,0);
     for(const t of g.towers){
       alive.add(t.id);let view=this.towers.get(t.id);
       if(view&&view.level!==t.level){this.removeTowerView(view,false);view=null;}
@@ -371,6 +409,8 @@ export class World3D {
       if(t.type==='arc'&&t.powered&&Math.random()<dt*1.4){const e=m.emitter.getWorldPosition(new THREE.Vector3()),a=Math.random()*TAU;this.ribbons.add([e,e.clone().add(_v2.set(Math.cos(a)*.25,-.25-Math.random()*.3,Math.sin(a)*.25))],{life:.08,width:.012,color:[1,.9,2.2],intensity:2,jitter:.12,segments:5});}
     }
     for(const view of [...this.towers.values()])if(!alive.has(view.id)){this.towers.delete(view.id);this.removeTowerView(view,true);}
+    const occupied=g.towers.map(t=>t.pad).sort((a,b)=>a-b).join(',');
+    if(occupied!==this.occupiedKey){this.occupiedKey=occupied;this.pads.setOccupied(new Set(g.towers.map(t=>t.pad)));}
     for(const d of this.dying){d.t+=dt;d.model.root.position.y=PAD_TOP-d.t*1.6;d.model.root.scale.setScalar(TOWER_SCALE*Math.max(.01,1-d.t*2));}
     this.dying=this.dying.filter(d=>{if(d.t<.5)return true;this.scene.remove(d.model.root);d.model.dispose();return false;});
   }
@@ -417,60 +457,72 @@ export class World3D {
     const local=view.model.anchors?view.model.anchors.map(a=>a.clone()):[view.model.anchor.position.clone()],o=this.at(other.x,other.y);
     return local.map(a=>a.multiplyScalar(TOWER_SCALE).add(view.model.root.position)).sort((a,b)=>a.distanceTo(o)-b.distanceTo(o))[0];
   }
+  // One creature from its parts: baked body, two-bone IK legs, eyes and claws. Living enemies and lingering remains share it.
+  // fold pulls the feet in under the body (a charred husk); a flipped root turns the same legs up into the air.
+  drawCreature(type,root,{gait=0,bob=0,tint,legTint,eyeTint,open=.35,fold=0}) {
+    const k=this.kinds[type],def=k.def,n=this.drawn,room=(mesh,count,extra=1)=>count+extra<=mesh.instanceMatrix.count;
+    if(!room(k.body,n.counts[type]))return false;
+    _m.makeTranslation(0,bob,0);_m.premultiply(root);k.body.setMatrixAt(n.counts[type],_m);k.body.setColorAt(n.counts[type]++,tint);
+    const L=def.legs,hips=L.hips,reach=L.reach*(1-fold*.75),stride=L.stride*(1-fold),lift=L.lift*(1-fold);
+    for(let i=0;i<hips.length;i++)for(const side of [1,-1]){
+      if(!room(this.legs,n.legs,2))break;
+      const [hx,hz]=hips[i],phase=gait+(i%2?Math.PI:0)+(side>0?0:Math.PI)+(hips.length>3?i*.9:0);
+      const H=_v.set(hx,def.bodyY*.92+bob,side*hz),F=_v2.set(hx*(1.25-fold*.45)+Math.cos(phase)*stride*.5,Math.max(0,-Math.sin(phase))*lift+fold*def.bodyY*.5,side*(hz+reach));
+      const D=Math.min(H.distanceTo(F),L.upper+L.lower-.001),dir=_v3.subVectors(F,H).normalize(),ax=(L.upper*L.upper-L.lower*L.lower+D*D)/(2*D),hk=Math.sqrt(Math.max(0,L.upper*L.upper-ax*ax));
+      _perp.set(0,1,0).addScaledVector(dir,-dir.y).normalize();const K=_knee.copy(H).addScaledVector(dir,ax).addScaledVector(_perp,hk);
+      for(const [A,B,r] of [[H,K,L.radius],[K,F,L.radius*.8]]){
+        const len=A.distanceTo(B);_q2.setFromUnitVectors(_up,_s.subVectors(B,A).normalize());
+        _m.compose(_s.addVectors(A,B).multiplyScalar(.5),_q2,_size.set(r,len,r)).premultiply(root);
+        this.legs.setMatrixAt(n.legs,_m);this.legs.setColorAt(n.legs++,legTint);
+      }
+    }
+    for(const [x,y,z] of def.eyes){if(!room(this.eyes,n.eyes))break;_m.compose(_v.set(x,y+bob,z),_q2.identity(),_s.setScalar(def.eyeSize)).premultiply(root);if(def.eyeScale)_m.scale(_v.fromArray(def.eyeScale));this.eyes.setMatrixAt(n.eyes,_m);this.eyes.setColorAt(n.eyes++,eyeTint);}
+    if(def.claws&&room(this.clawArms,n.claws,2)){
+      const c=def.claws;
+      for(const side of [1,-1]){
+        const arm=_m.compose(_v.set(c.arm[0],c.arm[1]+bob,side*c.arm[2]),_q2.setFromEuler(_euler.set(0,-side*.35,.15)),_s.setScalar(c.size*2.2)).premultiply(root);
+        this.clawArms.setMatrixAt(n.claws,arm);this.clawArms.setColorAt(n.claws,tint);
+        _jaw.compose(_v.set(.56,.02,0),_q2.setFromEuler(_euler.set(0,0,open)),_s.set(1,1,1)).premultiply(arm);
+        this.clawJaws.setMatrixAt(n.claws,_jaw);this.clawJaws.setColorAt(n.claws++,tint);
+      }
+    }
+    return true;
+  }
   syncCreatures(dt) {
-    const g=this.game,alive=new Set(),counts={},cam=this.camera,night=g.isNight();
-    for(const type of Object.keys(this.kinds))counts[type]=0;
-    let legN=0,eyeN=0,clawN=0,barN=0;const tint=new THREE.Color(),legColor=new THREE.Color(),eyeGlow=new THREE.Color(),knee=new THREE.Vector3(),perp=new THREE.Vector3(),size=new THREE.Vector3(),euler=new THREE.Euler(),jaw=new THREE.Matrix4();
-    const room=(mesh,n,extra=1)=>n+extra<=mesh.instanceMatrix.count;
+    const g=this.game,alive=new Set(),cam=this.camera,night=g.isNight(),n=this.drawn={counts:{},legs:0,eyes:0,claws:0,ice:0};let barN=0;
+    for(const type of Object.keys(this.kinds))n.counts[type]=0;
+    const tint=_t1,legTint=_t2,eyeTint=_t3;
     for(const e of g.enemies){
-      if(e.hp<=0)continue;
-      const k=this.kinds[e.type];if(!k||!room(k.body,counts[e.type]))continue;const def=k.def;alive.add(e.id);
+      if(e.hp<=0||!this.kinds[e.type])continue;
+      const def=this.kinds[e.type].def;alive.add(e.id);
       let v=this.enemyViews.get(e.id);
-      if(!v){v={yaw:0,gait:Math.random()*6,last:e.distance};this.enemyViews.set(e.id,v);
+      if(!v){v={yaw:0,gait:Math.random()*6,last:e.distance,flinch:0,fx:0,fz:0,hop:0,hopH:0,wet:0};this.enemyViews.set(e.id,v);
         const a=pathPosition(e.distance+.1),b=pathPosition(Math.max(0,e.distance-.1));v.yaw=Math.atan2(-(a.y-b.y),a.x-b.x);
-        if(e.distance<.5&&e.type!=='spawn')this.splash(this.at(e.x-.2,e.y),e.type==='boss'?2.5:.7);}
+        if(e.distance<.5&&e.type!=='spawn'){this.splash(this.at(e.x-.2,e.y),e.type==='boss'?2.5:.7);v.wet=2.6;}}
       const moved=e.distance-v.last;v.last=e.distance;v.gait+=moved*Math.PI/def.legs.stride;
       const a=pathPosition(e.distance+.12),b=pathPosition(Math.max(0,e.distance-.12)),targetYaw=Math.atan2(-(a.y-b.y),a.x-b.x);
       let dy=targetYaw-v.yaw;dy=Math.atan2(Math.sin(dy),Math.cos(dy));v.yaw+=dy*(1-Math.exp(-dt*9));
+      v.flinch=Math.max(0,v.flinch-dt*(v.hop>0?3:7));v.hop=Math.max(0,v.hop-dt*3.2);v.wet=Math.max(0,v.wet-dt);
+      if(v.hop<=0&&v.air){v.air=false;this.smoke.spawn({x:e.x-6.5,y:this.field.sample(e.x,e.y)+.03,z:e.y-5.5,vy:.1,life:.7,size:.12,grow:.3,color:DUST[0],alpha:.35,sprite:SPRITE.smoke});}
+      if(v.hop>0)v.air=true;
       const rise=e.type!=='spawn'&&e.distance<.55?(1-e.distance/.55)**2*(.3+def.bodyY*def.scale):0;
-      const gy=this.field.sample(e.x,e.y),stun=e.stun>0,wobble=stun?Math.sin(this.time*18+e.id)*.12:0;
-      const root=_m2.compose(_v.set(e.x-6.5,gy-rise,e.y-5.5),_q.setFromAxisAngle(_up,v.yaw+wobble),_s.setScalar(def.scale));
-      const hit=e.hit>0?1+e.hit*18:1,frost=e.slow>0,hidden=night&&!e.seen,shade=hidden?.26:e.lit?1.18:1;
+      const gy=this.field.sample(e.x,e.y),stun=e.stun>0,wobble=stun?Math.sin(this.time*18+e.id)*.12:0,f=v.flinch*v.flinch,push=(e.type==='boss'?.02:.08)*f;
+      // A hit shoves the body back along the shot and tips it away from the shooter; a blast also lifts it off its feet.
+      _q.setFromAxisAngle(_up,v.yaw+wobble);if(f>.01)_q.premultiply(_q3.setFromAxisAngle(_axis.set(v.fz,0,-v.fx),(e.type==='boss'?.08:.38)*f));
+      const root=_m2.compose(_v.set(e.x-6.5+v.fx*push,gy-rise+Math.sin(Math.PI*v.hop)*v.hopH,e.y-5.5+v.fz*push),_q,_s.setScalar(def.scale));
+      const hit=e.hit>0?1+e.hit*18:1,frost=e.slow>0,hidden=night&&!e.seen,shade=(hidden?.26:e.lit?1.18:1)*(1-.22*Math.min(1,v.wet));
       tint.setRGB(hit*(frost?.72:stun?1.25:1),hit*(frost?.92:stun?1.2:1),hit*(frost?1.35:stun?.8:1)).multiplyScalar(shade);
-      const bob=Math.abs(Math.sin(v.gait))*def.legs.lift*.35;
-      _m.makeTranslation(0,bob,0);_m.premultiply(root);k.body.setMatrixAt(counts[e.type],_m);k.body.setColorAt(counts[e.type]++,tint);
-      // Legs: two-bone IK from hip to a stepping foot.
-      const L=def.legs,hips=L.hips;legColor.set(def.leg).multiplyScalar(hit*shade);
-      for(let i=0;i<hips.length;i++)for(const side of [1,-1]){
-        if(!room(this.legs,legN,2))break;
-        const [hx,hz]=hips[i],phase=v.gait+(i%2?Math.PI:0)+(side>0?0:Math.PI)+(hips.length>3?i*.9:0);
-        const H=_v.set(hx,def.bodyY*.92+bob,side*hz),fx=hx*1.25+Math.cos(phase)*L.stride*.5,lift=Math.max(0,-Math.sin(phase))*L.lift;
-        const F=_v2.set(fx,lift,side*(hz+L.reach));
-        const D=Math.min(H.distanceTo(F),L.upper+L.lower-.001),dir=_v3.subVectors(F,H).normalize(),ax=(L.upper*L.upper-L.lower*L.lower+D*D)/(2*D),hk=Math.sqrt(Math.max(0,L.upper*L.upper-ax*ax));
-        perp.set(0,1,0).addScaledVector(dir,-dir.y).normalize();const K=knee.copy(H).addScaledVector(dir,ax).addScaledVector(perp,hk);
-        for(const [A,B,r] of [[H,K,L.radius],[K,F,L.radius*.8]]){
-          const len=A.distanceTo(B);_q2.setFromUnitVectors(_up,_s.subVectors(B,A).normalize());
-          _m.compose(_s.addVectors(A,B).multiplyScalar(.5),_q2,size.set(r,len,r)).premultiply(root);
-          this.legs.setMatrixAt(legN,_m);this.legs.setColorAt(legN++,legColor);
-        }
-      }
-      eyeGlow.set(def.eye).multiplyScalar(e.type==='boss'?5:3.2);
-      for(const [x,y,z] of def.eyes){if(!room(this.eyes,eyeN))break;_m.compose(_v.set(x,y+bob,z),_q.identity(),_s.setScalar(def.eyeSize)).premultiply(root);if(def.eyeScale)_m.scale(_v.fromArray(def.eyeScale));this.eyes.setMatrixAt(eyeN,_m);this.eyes.setColorAt(eyeN++,eyeGlow);}
-      if(def.claws&&room(this.clawArms,clawN,2)){
-        const c=def.claws,open=.35+.3*Math.sin(this.time*(e.type==='boss'?2.2:3.4)+e.id);
-        for(const side of [1,-1]){
-          const arm=_m.compose(_v.set(c.arm[0],c.arm[1]+bob,side*c.arm[2]),_q.setFromEuler(euler.set(0,-side*.35,.15)),_s.setScalar(c.size*2.2)).premultiply(root);
-          this.clawArms.setMatrixAt(clawN,arm);this.clawArms.setColorAt(clawN,tint);
-          jaw.compose(_v.set(.56,.02,0),_q.setFromEuler(euler.set(0,0,open)),_s.set(1,1,1)).premultiply(arm);
-          this.clawJaws.setMatrixAt(clawN,jaw);this.clawJaws.setColorAt(clawN++,tint);
-        }
-      }
+      legTint.set(def.leg).multiplyScalar(hit*shade);eyeTint.set(def.eye).multiplyScalar(e.type==='boss'?5:3.2);
+      const bob=Math.abs(Math.sin(v.gait))*def.legs.lift*.35,open=.35+.3*Math.sin(this.time*(e.type==='boss'?2.2:3.4)+e.id);
+      if(!this.drawCreature(e.type,root,{gait:v.gait,bob,tint,legTint,eyeTint,open}))continue;
+      // Fresh out of the surf, water runs off the shell.
+      if(v.wet>0&&Math.random()<dt*18*Math.min(1,v.wet)){_v.set((Math.random()-.5)*.3,def.bodyY*1.2,(Math.random()-.5)*.24).applyMatrix4(root);this.additive.spawn({x:_v.x,y:_v.y,z:_v.z,vy:-.3,life:.45,size:.022,stretch:.02,color:rgb('#cfe8f2',1.6),gravity:9,sprite:SPRITE.glow});}
       if(def.core&&Math.random()<dt*20){const [x,y,z,r]=def.core;_v.set(x,y,z).applyMatrix4(root);this.additive.spawn({x:_v.x+(Math.random()-.5)*r,y:_v.y+r*.6,z:_v.z+(Math.random()-.5)*r,vy:.6,life:.6,size:.12,color:rgb('#ff6a2a',2.5),sprite:SPRITE.glow});}
       if(e.type==='tank'&&Math.abs(Math.sin(v.gait))<.08&&moved>0&&Math.random()<.4)this.smoke.spawn({x:e.x-6.5,y:gy+.03,z:e.y-5.5,vy:.15,life:.8,size:.1,grow:.25,color:DUST[0],alpha:.35,sprite:SPRITE.smoke});
       if(stun&&Math.random()<dt*10){_v.set(0,def.hpY*.8,0).applyMatrix4(root);this.additive.spawn({x:_v.x+(Math.random()-.5)*.3,y:_v.y,z:_v.z+(Math.random()-.5)*.3,vy:.3,life:.4,size:.06,color:rgb('#fff0a0',3),sprite:SPRITE.star,spin:5});}
       if(frost&&Math.random()<dt*6){_v.set(0,def.bodyY,0).applyMatrix4(root);this.smoke.spawn({x:_v.x,y:_v.y,z:_v.z,vy:-.05,life:.9,size:.12,grow:.2,color:rgb('#e6fbff'),alpha:.3,sprite:SPRITE.smoke});}
       // Health bar, billboarded towards the camera.
-      if((e.hp<e.maxHp||e.type==='boss')&&!hidden&&room(this.hpBack,barN)){
+      if((e.hp<e.maxHp||e.type==='boss')&&!hidden&&barN<this.hpBack.instanceMatrix.count){
         const w=def.hpW*def.scale,frac=clamp(e.hp/e.maxHp,0,1);_v.set(0,def.hpY,0).applyMatrix4(root);
         _m.compose(_v,cam.quaternion,_s.set(w+.04,e.type==='boss'?.085:.055,1));this.hpBack.setMatrixAt(barN,_m);this.hpBack.setColorAt(barN,_c.set('#1d3533'));
         _v2.set(1,0,0).applyQuaternion(cam.quaternion).multiplyScalar(-(1-frac)*w/2);
@@ -478,9 +530,67 @@ export class World3D {
         this.hpFill.setColorAt(barN++,_c.set(e.type==='boss'?'#f0a86e':frac>.5?'#d6dea5':frac>.25?'#e8c47a':'#e88a6a'));
       }
     }
-    for(const [type,k] of Object.entries(this.kinds)){k.body.count=counts[type];k.body.instanceMatrix.needsUpdate=true;if(k.body.instanceColor)k.body.instanceColor.needsUpdate=true;}
-    for(const [mesh,n] of [[this.legs,legN],[this.eyes,eyeN],[this.clawArms,clawN],[this.clawJaws,clawN],[this.hpBack,barN],[this.hpFill,barN]]){mesh.count=n;mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
+    this.syncRemains(dt);
+    for(const [type,k] of Object.entries(this.kinds)){k.body.count=n.counts[type];k.body.instanceMatrix.needsUpdate=true;if(k.body.instanceColor)k.body.instanceColor.needsUpdate=true;}
+    for(const [mesh,count] of [[this.legs,n.legs],[this.eyes,n.eyes],[this.clawArms,n.claws],[this.clawJaws,n.claws],[this.ice,n.ice],[this.hpBack,barN],[this.hpFill,barN]]){mesh.count=count;mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
     for(const id of this.enemyViews.keys())if(!alive.has(id))this.enemyViews.delete(id);
+  }
+  // A kill leaves remains that match the weapon: gunfire flips a creature onto its back, frost leaves an ice statue that shatters,
+  // arcs leave a charred husk that crumbles, and mortars and strikes blow it apart on the spot.
+  addRemains(e) {
+    const def=CREATURES[e.enemyType],v=this.enemyViews.get(e.id);if(!def)return;
+    const p=this.at(e.x,e.y,.05),size=def.scale*(e.enemyType==='tank'?1.3:e.enemyType==='spawn'?.5:.8);
+    if(e.by==='mortar'||e.by==='strike'){
+      this.debris.spawn(p.x,p.y+.12,p.z,e.color||'#6a5a58',Math.round(5+size*6),1.1,.045*size);this.debris.spawn(p.x,p.y+.1,p.z,def.leg,Math.round(4+size*3),.9,.025);
+      this.smoke.spawn({x:p.x,y:p.y+.15,z:p.z,vy:.4,life:1.1,size:.18*size,grow:.4,color:rgb('#4a4744'),alpha:.5,sprite:SPRITE.smoke,drag:1});
+      return;
+    }
+    const style=e.by==='frost'?'frozen':e.by==='arc'?'charred':'flip';
+    this.remains.push({type:e.enemyType,x:p.x,z:p.z,yaw:v?.yaw??0,gait:v?.gait??0,fx:v?.flinch?v.fx:0,fz:v?.flinch?v.fz:0,style,t:0,life:style==='frozen'?1.25:style==='charred'?1.8:2,seed:Math.random()*6,done:false});
+    if(this.remains.length>32)this.remains.shift();
+    if(style==='frozen'){for(let i=0;i<10;i++){const a=Math.random()*TAU;this.additive.spawn({x:p.x+Math.cos(a)*.15,y:p.y+.15,z:p.z+Math.sin(a)*.15,vy:.3,life:.5,size:.03,color:rgb('#dffcff',2.6),sprite:SPRITE.star,spin:3});}}
+    else if(style==='charred'){this.flash(_v3.set(p.x,p.y+.4,p.z),'#b8a4ff',3,.15,2.5);for(let i=0;i<8;i++){const a=Math.random()*TAU;this.additive.spawn({x:p.x,y:p.y+.2,z:p.z,vx:Math.cos(a)*1.2,vy:1+Math.random(),vz:Math.sin(a)*1.2,life:.35,size:.02,stretch:.03,color:rgb('#d6c8ff',3),gravity:4,sprite:SPRITE.glow});}}
+    else{this.debris.spawn(p.x,p.y+.12,p.z,e.color||'#6a5a58',3,.5,.03);for(let i=0;i<6;i++){const a=Math.random()*TAU;this.additive.spawn({x:p.x,y:p.y+.18,z:p.z,vx:Math.cos(a)*.9,vy:.8+Math.random(),vz:Math.sin(a)*.9,life:.3,size:.018,stretch:.025,color:rgb('#ffcf80',3),gravity:5,sprite:SPRITE.glow});}}
+  }
+  syncRemains(dt) {
+    const tint=_t1,legTint=_t2,eyeTint=_t3;
+    for(const r of this.remains){
+      r.t+=dt;const def=CREATURES[r.type],k=r.t/r.life,gy=Math.max(this.field.sample(r.x+6.5,r.z+5.5),-.1),water=gy<.02;
+      _q.setFromAxisAngle(_up,r.yaw);let lift=0,sink=0,fold=0,slide=0,gait=r.gait,scale=def.scale;
+      if(r.style==='flip'){
+        // Hops, rolls onto its back and kicks for a moment before sinking away.
+        // It goes over away from the shot that killed it, or rolls onto its side when nothing pushed it.
+        const roll=Math.min(1,r.t/.32),angle=Math.PI*(1-(1-roll)**3),shot=Math.abs(r.fx)+Math.abs(r.fz)>.1;
+        if(shot){_q.premultiply(_q3.setFromAxisAngle(_axis.set(r.fz,0,-r.fx).normalize(),angle));slide=.22*(1-(1-roll)**2);}
+        else _q.multiply(_q3.setFromAxisAngle(_axis.set(1,0,0),angle));lift=Math.sin(roll*Math.PI)*.22+def.bodyY*2*def.scale*(1-Math.cos(angle))/2;
+        r.gait+=dt*22*Math.max(0,1-r.t/1.3);gait=r.gait;sink=Math.max(0,r.t-1.3)*.45;fold=.15;
+        tint.set(def.leg).lerp(_c.set('#6a5a58'),.3).multiplyScalar(1.2);eyeTint.setRGB(.05,.04,.04);
+      } else if(r.style==='frozen'){
+        tint.setRGB(.8,1,1.35).multiplyScalar(1.2);eyeTint.setRGB(.5,.8,1.2);
+        const n=this.drawn,grow=easeBack(Math.min(1,r.t/.18)),w=def.hpW*def.scale;
+        if(n.ice<this.ice.instanceMatrix.count){_m.compose(_v.set(r.x,gy+def.bodyY*def.scale*.95,r.z),_q2.copy(_q).multiply(_q3.setFromEuler(_euler.set(r.seed*.07,r.seed,r.seed*.05))),_s.set(w*.78*grow,(def.bodyY*def.scale*1.5+.06)*grow,w*.62*grow));this.ice.setMatrixAt(n.ice++,_m);}
+        if(Math.random()<dt*14)this.additive.spawn({x:r.x+(Math.random()-.5)*.3,y:gy+def.bodyY*def.scale*1.4,z:r.z+(Math.random()-.5)*.3,life:.35,size:.03,color:rgb('#e8fdff',2.4),sprite:SPRITE.star,spin:4});
+        if(k>.72&&!r.done){r.done=true;r.t=r.life;
+          this.debris.spawn(r.x,gy+.12,r.z,'#d4f3fb',Math.round(8+def.scale*6),.9,.04*def.scale);
+          for(let i=0;i<14;i++){const a=Math.random()*TAU,sp=.6+Math.random()*1.2;this.additive.spawn({x:r.x,y:gy+.15,z:r.z,vx:Math.cos(a)*sp,vy:.6+Math.random()*1.4,vz:Math.sin(a)*sp,life:.5,size:.025,color:rgb('#e8fdff',2.8),gravity:5,sprite:SPRITE.star,spin:5});}
+          this.smoke.spawn({x:r.x,y:gy+.12,z:r.z,vy:.1,life:1,size:.2,grow:.35,color:rgb('#e6fbff'),alpha:.4,sprite:SPRITE.smoke});this.onSound?.('shatter',this.hear(r.x+6.5,r.z+5.5));}
+      } else {
+        // Charred: the shell blackens, the legs curl under and smoke rises until it crumbles to ash.
+        const burn=Math.min(1,r.t/.3);tint.setRGB(1,1,1).lerp(_c.setRGB(.09,.08,.075),burn);fold=Math.min(1,r.t/.7);sink=Math.max(0,r.t-.9)*.18;
+        eyeTint.setRGB(1.6,.9,.4).multiplyScalar(Math.max(0,1-r.t*2));
+        if(Math.random()<dt*9)this.smoke.spawn({x:r.x+(Math.random()-.5)*.2,y:gy+.2,z:r.z+(Math.random()-.5)*.2,vy:.45,life:1.3,size:.08,grow:.3,color:rgb('#3e3b39'),alpha:.45,sprite:SPRITE.smoke,drag:.6});
+        if(r.t<.6&&Math.random()<dt*10){_v.set(r.x,gy+.2,r.z);const a=Math.random()*TAU;this.ribbons.add([_v.clone(),_v.clone().add(_v2.set(Math.cos(a)*.18,.12,Math.sin(a)*.18))],{life:.07,width:.01,color:[1,.9,2.2],intensity:2,jitter:.08,segments:4});}
+      }
+      if(r.t>=r.life&&!r.done){r.done=true;
+        if(water)this.splash(_v.set(r.x,0,r.z),.6);
+        else this.smoke.spawn({x:r.x,y:gy+.08,z:r.z,vy:.15,life:1,size:.16,grow:.3,color:r.style==='charred'?rgb('#5c5a57'):DUST[0],alpha:.4,sprite:SPRITE.smoke});
+      }
+      if(r.done)continue;
+      legTint.copy(tint).multiplyScalar(.7);scale*=r.style==='charred'?1-.15*k:1;
+      const root=_m2.compose(_v.set(r.x+r.fx*slide,gy+lift-sink,r.z+r.fz*slide),_q,_s.setScalar(scale));
+      this.drawCreature(r.type,root,{gait,tint,legTint,eyeTint,open:.1,fold});
+    }
+    this.remains=this.remains.filter(r=>!r.done);
   }
   syncShells(dt) {
     let n=0;
@@ -548,7 +658,8 @@ export class World3D {
     const k=this.beamDown,length=this.beamReach*1.08/15,wide=BEAM.radius*1.02/1.35;
     lh.beams[0].scale.set(1+(length-1)*k,1+(wide-1)*k,1+(wide-1)*k);
     const strikeBoost=this.strike?2.2:1+k*.7;
-    lh.beams.forEach((b,i)=>{b.material.uniforms.uIntensity.value=power*b.userData.strength*(i===0?strikeBoost:1-k)*.085;b.material.uniforms.uTime.value=this.clock;b.visible=power>.02&&(i===0||k<.9);});
+    const haze=clamp(1-(s.fogFar-50)/60,0,1);
+    lh.beams.forEach((b,i)=>{const u=b.material.uniforms;u.uIntensity.value=power*b.userData.strength*(i===0?strikeBoost:1-k)*.085;u.uTime.value=this.clock;u.uHaze.value=haze;u.uRain.value=s.rain;u.uWind.value.set(1.2+s.wind*2.5,.5+s.wind);b.visible=power>.02&&(i===0||k<.9);});
     lh.lampMat.emissiveIntensity=2+power*3.2;lh.lensMat.emissiveIntensity=.6+power*1.4;lh.windowMat.emissiveIntensity=(s.lamps*1.6)*dying;
     this.lamp.intensity=(2+power*6)*(lost?dying:1);
     _v.set(Math.cos(this.beamYaw)*Math.cos(this.beamTilt),-Math.sin(this.beamTilt),-Math.sin(this.beamYaw)*Math.cos(this.beamTilt));
@@ -566,6 +677,7 @@ export class World3D {
   ambient(dt,s) {
     const t=this.clock;
     for(const b of this.buoys){b.mesh.position.y=b.base.y+Math.sin(t*1.3+b.phase)*.05*s.waves;b.mesh.rotation.z=Math.sin(t*1.1+b.phase)*.1*s.waves;b.light.visible=(t+b.phase)%2.4<.35;}
+    this.farLight.visible=s.lamps>.4&&t%5<.9;this.farLight.scale.setScalar(1+s.lamps);
     this.boat.position.y=.02+Math.sin(t*1.2)*.035*s.waves;this.boat.rotation.x=Math.sin(t*.9)*.05*s.waves;this.boat.rotation.z=Math.sin(t*1.3+1)*.03*s.waves;
     const day=clamp((s.keyI-1)/1.2,0,1)*(1-s.rain);
     for(const b of this.birds){
@@ -585,9 +697,16 @@ export class World3D {
       this.onSound?.('firework',{});
     }
   }
+  // Live marks are packed at the front of the uniform arrays so the shaders loop over only as many as there are.
   updateDecals(dt) {
-    const arr=this.terrain.uniforms.uDecals.value;
-    for(let i=0;i<MAX_DECALS;i++){const d=this.decals[i];if(!d){arr[i].set(0,0,1,0);continue;}d.age+=dt;const f=Math.max(0,1-d.age/26);arr[i].set(d.x,d.z,d.r,d.s*f);}
+    const u=this.terrain.uniforms,arr=u.uDecals.value,heat=u.uHeat.value,over=!['wave','lost'].includes(this.game.phase);let n=0;
+    for(let i=0;i<MAX_DECALS;i++){
+      const d=this.decals[i];if(!d)continue;
+      d.age+=dt;if(over)d.clear+=dt;const f=Math.max(0,1-d.clear/6);
+      if(f<=0){this.decals[i]=null;continue;}
+      arr[n].set(d.x,d.z,d.r,d.s*f);heat[n++]=Math.max(0,1-d.age/2.8)*f;
+    }
+    u.uDecalCount.value=n;
   }
   draw(dt,realDt=dt){if(!this.w)return;this.update(dt,realDt);this.render();}
   render() {
@@ -601,8 +720,12 @@ export class World3D {
     const s=this.atmo.state,g=this.game;
     this.atmo.setMood(moodFor(g));this.atmo.update(dt,realDt,this.clock,this.camera,this.rig.target);
     this.renderer.toneMappingExposure=s.exposure;
-    const wu=this.water.uniforms;wu.uTime.value=this.clock;wu.uAmp.value=s.waves;wu.uChop.value=s.storm;wu.uDeep.value.copy(s.deep);wu.uShallow.value.copy(s.shallow);wu.uBright.value=s.waterBright;
-    const tu=this.terrain.uniforms;tu.uTime.value=this.clock;tu.uWet.value=s.wet;tu.uSun.value=clamp(s.keyI/2.5,0,1);tu.uCloud.value=s.clouds*clamp((s.keyI-.9)/1.6,0,1);
+    const wu=this.water.uniforms;wu.uTime.value=this.clock;wu.uAmp.value=s.waves;wu.uChop.value=s.storm;wu.uDeep.value.copy(s.deep);wu.uShallow.value.copy(s.shallow);wu.uBright.value=s.waterBright;wu.uRain.value=s.rain;
+    // The glitter path on the sea follows whichever is brighter: a low sun or the moon.
+    const au=this.atmo.uniforms,sunK=s.sunGlow*clamp(s.sun[1]/6+.4,0,1)*(1-s.clouds*.5),moonK=s.moonGlow*(1-s.clouds*.6)*(1-s.rain)*.55;
+    if(sunK>=moonK){wu.uGlintDir.value.copy(au.uSunDir.value);wu.uGlintColor.value.copy(s.sunColor).multiplyScalar(sunK*1.6);}
+    else{wu.uGlintDir.value.copy(au.uMoonDir.value);wu.uGlintColor.value.setRGB(.8,.86,1).multiplyScalar(moonK);}
+    const tu=this.terrain.uniforms;tu.uTime.value=this.clock;tu.uWet.value=s.wet;tu.uRain.value=s.rain;tu.uSun.value=clamp(s.keyI/2.5,0,1);tu.uCloud.value=s.clouds*clamp((s.keyI-.9)/1.6,0,1);
     this.mats.wind.uTime.value=this.clock;this.mats.wind.uWind.value=.35+s.wind*1.4;
     const ru=this.rain.uniforms;ru.uTime.value=this.clock;ru.uIntensity.value=s.rain;ru.uCenter.value.copy(this.rig.target);ru.uWind.value.set(1.2+s.wind*2.5,.5+s.wind);this.rain.mesh.visible=s.rain>.02;
     this.lampLevel=clamp(s.lamps,0,1)*clamp((2.4-s.keyI)/1.1,0,1);

@@ -222,11 +222,12 @@ export class Game {
     if(type==='boss')this.emit('boss');
     return e;
   }
-  damageEnemy(e,damage,slow=0) {
+  // by names what landed the killing blow (gun, mortar, frost, arc or strike), so the renderer can show the right death.
+  damageEnemy(e,damage,slow=0,by='') {
     if(e.hp<=0)return false;
     e.hp-=damage;e.hit=.12;if(slow)e.slow=1.65;
     if(e.hp>0)return false;
-    this.credits+=e.reward;this.kills++;this.emit('kill',{x:e.x,y:e.y,color:e.color,enemyType:e.type,id:e.id,reward:e.reward});
+    this.credits+=e.reward;this.kills++;this.emit('kill',{x:e.x,y:e.y,color:e.color,enemyType:e.type,id:e.id,reward:e.reward,by});
     // A splitter breaks into smaller, faster spawnlings just behind where it fell.
     if(e.split) {
       for(let i=0;i<e.split;i++)this.spawn('spawn',Math.max(0,e.distance-.22*i)).hit=.2;
@@ -235,7 +236,7 @@ export class Game {
     return true;
   }
   // Tower damage is stronger against enemies caught in the beam.
-  towerHit(e,damage,slow=0) {return this.damageEnemy(e,e.lit?damage*BEAM.bonus:damage,slow);}
+  towerHit(e,damage,slow=0,by='') {return this.damageEnemy(e,e.lit?damage*BEAM.bonus:damage,slow,by);}
   pickTarget(t,range) {
     let best=null,score=-Infinity;const night=this.isNight(),sight=range*DARK.sight;
     for(const e of this.enemies) {
@@ -286,7 +287,7 @@ export class Game {
     for(const s of this.strikes) {
       if((s.delay-=dt)>0)continue;
       const damage=this.strikeDamage(),hits=this.enemies.filter(e=>e.hp>0&&Math.hypot(e.x-s.x,e.y-s.y)<=STRIKE.radius);
-      for(const e of hits){e.stun=Math.max(e.stun,e.type==='boss'?STRIKE.bossStun:STRIKE.stun);this.damageEnemy(e,damage);}
+      for(const e of hits){e.stun=Math.max(e.stun,e.type==='boss'?STRIKE.bossStun:STRIKE.stun);this.damageEnemy(e,damage,0,'strike');}
       this.effects.push({kind:'strike',x:s.x,y:s.y,life:.6,total:.6});this.emit('strikeHit',{x:s.x,y:s.y,hits:hits.length});
     }
     this.strikes=this.strikes.filter(s=>s.delay>0);
@@ -310,18 +311,18 @@ export class Game {
       if(p.age<p.duration)continue;
       if(p.kind==='mortar') {
         const hits=this.enemies.filter(e=>e.hp>0&&Math.hypot(e.x-p.toX,e.y-p.toY)<=p.splash);
-        for(const e of hits)this.towerHit(e,p.damage);
-        this.effects.push({kind:'blast',x:p.toX,y:p.toY,life:.45,total:.45});this.emit('blast',{x:p.toX,y:p.toY,hits:hits.length});
+        for(const e of hits)this.towerHit(e,p.damage,0,'mortar');
+        this.effects.push({kind:'blast',x:p.toX,y:p.toY,life:.45,total:.45});this.emit('blast',{x:p.toX,y:p.toY,hits:hits.length,radius:p.splash});
       } else if(p.kind==='arc') {
         let damage=p.damage;
         for(const id of p.chain) {
           const e=this.enemies.find(e=>e.id===id&&e.hp>0);
-          if(e){this.emit('hit',{kind:'arc',x:e.x,y:e.y,id:e.id});this.towerHit(e,damage);}
+          if(e){this.emit('hit',{kind:'arc',x:e.x,y:e.y,id:e.id,fromX:p.fromX,fromY:p.fromY});this.towerHit(e,damage,0,'arc');}
           damage*=p.falloff;
         }
       } else {
         const e=this.enemies.find(e=>e.id===p.target&&e.hp>0);
-        if(e){this.emit('hit',{kind:p.kind,x:e.x,y:e.y,id:e.id});this.towerHit(e,p.damage,p.slow);}
+        if(e){this.emit('hit',{kind:p.kind,x:e.x,y:e.y,id:e.id,fromX:p.fromX,fromY:p.fromY});this.towerHit(e,p.damage,p.slow,p.kind);}
       }
     }
     this.projectiles=this.projectiles.filter(p=>p.age<p.duration);

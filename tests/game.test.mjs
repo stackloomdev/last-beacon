@@ -172,6 +172,11 @@ test('combat events carry map positions for visual effects',()=>{
     assert.ok(event,`missing ${type}`);assert.ok(Number.isFinite(event.x)&&Number.isFinite(event.y),type);
   }
   assert.deepEqual(events.filter(e=>e.type==='kill').map(e=>[e.enemyType,e.reward]),[['tank',20],['tank',20],['tank',20]]);
+  assert.ok(events.filter(e=>e.type==='kill').every(e=>['gun','mortar'].includes(e.by)),'kills name the weapon that landed the blow');
+  assert.ok(events.filter(e=>e.type==='hit').every(e=>Number.isFinite(e.fromX)&&Number.isFinite(e.fromY)),'hits say where the shot came from');
+  const strike=new Game({starter:false});strike.startWave();strike.queue=[];const target=place(strike,'crawler',9);
+  strike.activateStrike(target.x,target.y);const blow=collect(strike,STRIKE.delay+.2).find(e=>e.type==='kill');
+  assert.equal(blow.by,'strike');
 });
 test('night skies arrive on waves 5, 6, 7 and 10 and recur in the endless tide',()=>{
   assert.deepEqual(Array.from({length:10},(_,i)=>isNightWave(i+1)),[false,false,false,false,true,true,true,false,false,true]);
