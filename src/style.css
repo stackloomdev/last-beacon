@@ -186,7 +186,7 @@ h1,h2,h3,p{margin:0}
 .tm-actions .upgrade:hover:not(:disabled){background:rgba(143,174,124,.32)}
 .tm-actions .sell small{color:#c4cdb9}
 .tm-note{font-size:10px;color:#a9b7a6;line-height:1.6;margin-top:8px}
-.coach{position:absolute;left:0;top:0;width:max-content;max-width:260px;padding:11px 32px 11px 14px;border-radius:10px;background:#f2e9c9;color:#2c4232;font-size:12px;line-height:1.6;box-shadow:0 12px 30px rgba(0,0,0,.35);transform:translate(-50%,calc(-100% - 18px));animation:float 3s ease-in-out infinite}
+.coach{position:absolute;z-index:7;left:0;top:0;width:max-content;max-width:260px;padding:11px 32px 11px 14px;border-radius:10px;background:#f2e9c9;color:#2c4232;font-size:12px;line-height:1.6;box-shadow:0 12px 30px rgba(0,0,0,.35);transform:translate(-50%,calc(-100% - 18px));animation:float 3s ease-in-out infinite}
 .coach::after{content:'';position:absolute;left:50%;bottom:-6px;width:12px;height:12px;background:#f2e9c9;transform:translateX(-50%) rotate(45deg)}
 .coach.below{transform:translate(-50%,18px)}
 .coach.below::after{top:-6px;bottom:auto}
