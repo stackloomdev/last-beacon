@@ -80,7 +80,9 @@ const BEAM_FRAGMENT=`varying float vAlong;varying vec3 vN,vView,vWorld;uniform v
 float bh(vec3 p){p=fract(p*.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
 float bn(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
   return mix(mix(mix(bh(i),bh(i+vec3(1,0,0)),f.x),mix(bh(i+vec3(0,1,0)),bh(i+vec3(1,1,0)),f.x),f.y),mix(mix(bh(i+vec3(0,0,1)),bh(i+vec3(1,0,1)),f.x),mix(bh(i+vec3(0,1,1)),bh(i+vec3(1,1,1)),f.x),f.y),f.z);}
-void main(){float edge=pow(abs(dot(normalize(vN),normalize(vView))),2.4);float fall=pow(1.-vAlong,2.2)*smoothstep(0.,.12,vAlong);
+void main(){float edge=pow(abs(dot(normalize(vN),normalize(vView))),2.4);
+// Raster interpolation can overshoot 1 at the cone rim; a negative fractional-power base produces NaN and poisons Bloom.
+float fall=pow(max(1.-vAlong,0.),2.2)*smoothstep(0.,.12,vAlong);
 vec3 drift=vec3(uWind.x,0.,uWind.y)*uTime*.35;
 float haze=.55+.55*bn(vWorld*1.3-drift)+.3*bn(vWorld*3.7-drift*1.6);
 float motes=pow(bn(vWorld*16.-drift*2.+vec3(0.,uTime*.25,0.)),9.)*5.*(1.-uRain*.7);

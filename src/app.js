@@ -395,7 +395,7 @@ const COACH_KEY='last-beacon-coach',COACH_PAD=3;
 let coachDone=new Set();try{coachDone=new Set(JSON.parse(read(COACH_KEY)||'[]'));}catch{}
 let coach=null,coachKey='',coachShown=0;
 function finishCoach(step){if(coachDone.has(step))return;coachDone.add(step);write(COACH_KEY,JSON.stringify([...coachDone]));if(coach?.step===step)coach=null;}
-$('coach-close').addEventListener('click',()=>{if(coach)finishCoach(coach.step);coachKey='';updateCoach();});
+$('coach-close').addEventListener('click',()=>{if(coach)finishCoach(coach.step);updateCoach();});
 function currentCoach(){
   const g=game,built=g.towers.length>1;
   if(!coachDone.has('build')&&g.wave===0&&g.phase==='build'&&!built)return {step:'build',world:PADS[COACH_PAD],z:.4};
