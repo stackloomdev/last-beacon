@@ -19,7 +19,7 @@
 
 ## 发布与投稿状态
 
-正式试玩：[last-beacon.loupengju.cc](https://last-beacon.loupengju.cc)。公开游戏源码：[stackloomdev/last-beacon](https://github.com/stackloomdev/last-beacon)。游戏已部署至 Vercel，创作者已确认正式域名可在未登录 Vercel 的浏览器中直接游玩。
+正式试玩：[last-beacon.pjstack.dev](https://last-beacon.pjstack.dev)。公开游戏源码：[stackloomdev/last-beacon](https://github.com/stackloomdev/last-beacon)。2026-10-10 已在桌面 Chrome 中验证新域名无需登录或安装，可开始第一波并进入第二波准备阶段。
 
 上游投稿：[草稿 PR #4](https://github.com/MartinDelophy/awesome-gpt-6-astra/pull/4)。修改中英文 README，在「策略与模拟」加入作品，并更新游戏数量；官网现有 27 项测试与两份清单的解析检查通过。
 

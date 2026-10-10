@@ -65,6 +65,8 @@
 
 ## 发布与正式域名
 
+当前正式试玩：[last-beacon.pjstack.dev](https://last-beacon.pjstack.dev)。域名于 2026-10-10 更新；本次访问验证见文末记录。
+
 Vercel 已完成生产部署。2026-09-07，创作者确认正式域名 [last-beacon.loupengju.cc](https://last-beacon.loupengju.cc) 可在未登录 Vercel 的浏览器中直接进入游戏。本轮联网读取工具未能打开该域名，因此正式域名免登录访问的结论来自创作者确认，未记为代理完成的线上试玩。
 
 已向原清单仓库建立[草稿 PR #4](https://github.com/MartinDelophy/awesome-gpt-6-astra/pull/4)。该投稿分支的官网现有测试 27 项通过，实际解析中英文 README 均得到 4 款游戏和 1 个艺术沙盒，Last Beacon 的分类、作者、试玩与源码链接正确。
@@ -217,3 +219,11 @@ Vercel 已完成生产部署。2026-09-07，创作者确认正式域名 [last-be
 - `npm test`：37 项通过，包括静态目录与单文件版构建；`git diff --check` 通过。
 
 后续光束和夜战提示通过仅在 `?debug` 下启用的游戏接口准备状态，再实际点击关闭按钮验证；没有重跑完整十波战斗。
+
+## 2026-10-10 · 正式试玩域名更新
+
+正式试玩地址更新为 <https://last-beacon.pjstack.dev>。上文的旧域名属于 2026-09-07 的发布记录。
+
+在桌面 Chrome 中直接打开新地址，无需登录、下载或安装；三维海岛、资源面板与建造栏正常显示。点击「Begin the first wave」进入第一波战斗，随后正常进入第二波准备阶段。HTTP 检查返回 200。
+
+本次验证覆盖新域名访问与首波运行，未重跑完整战役或多设备性能测试。
